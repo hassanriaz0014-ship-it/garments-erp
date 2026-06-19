@@ -16,6 +16,9 @@ const pool = process.env.DATABASE_URL
 
 pool.connect()
   .then(() => console.log('✅ Database connected successfully'))
-  .catch((err) => console.error('❌ Database connection error:', err.message));
+  .catch((err) => {
+    console.error('❌ Database connection error:', err.message);
+    // Don't crash the app
+  });
 
 module.exports = pool;
