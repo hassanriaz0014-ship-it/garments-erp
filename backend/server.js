@@ -21,6 +21,7 @@ const invoicesRoutes = require('./routes/invoices');
 const categoriesRoutes = require('./routes/categories');
 const partyAccountsRoutes = require('./routes/partyAccounts');
 const partyPaymentsRoutes = require('./routes/partyPayments');
+const purchaseOrdersRoutes = require('./routes/PurchaseOrders');
 
 // Create the express app
 const app = express();
@@ -42,10 +43,11 @@ app.use('/api/invoices', invoicesRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/party-accounts', partyAccountsRoutes);
 app.use('/api/party-payments', partyPaymentsRoutes);
+app.use('/api/purchase-orders', purchaseOrdersRoutes);
 
 // Test route
 app.get('/', (req, res) => {
-  res.json({ message: 'Garments ERP server is running!' });
+  res.json({ message: 'RS APPARELS server is running!' });
 });
 
 // Start server

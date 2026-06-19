@@ -5,7 +5,19 @@ import {
   useWindowDimensions
 } from 'react-native';
 import client from '../api/client';
+
 import DatePicker from '../components/DatePicker';
+
+const SIZES = ['S', 'M', 'L', 'XL', 'XXL', 'General'];
+
+const DEFAULT_COST_ITEMS = [
+  { id: '1', label: 'Fabric', amount: '' },
+  { id: '2', label: 'Thread & Accessories', amount: '' },
+  { id: '3', label: 'Buttons / Zippers', amount: '' },
+  { id: '4', label: 'Labour', amount: '' },
+  { id: '5', label: 'Packaging', amount: '' },
+  { id: '6', label: 'Other', amount: '' },
+];
 
 export default function PartyDetailScreen({ route }) {
   const { party } = route.params;
@@ -23,6 +35,7 @@ export default function PartyDetailScreen({ route }) {
   const [accounts, setAccounts] = useState([]);
   const [payments, setPayments] = useState([]);
   const [ledgerEntries, setLedgerEntries] = useState([]);
+  const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
@@ -30,6 +43,10 @@ export default function PartyDetailScreen({ route }) {
   const [invoiceFilterModalVisible, setInvoiceFilterModalVisible] = useState(false);
   const [accountModalVisible, setAccountModalVisible] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
+  const [poModalVisible, setPoModalVisible] = useState(false);
+  const [viewPOModalVisible, setViewPOModalVisible] = useState(false);
+  const [viewPO, setViewPO] = useState(null);
+  const [editingPO, setEditingPO] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
   const [editingInvoice, setEditingInvoice] = useState(null);
   const [editPaymentVisible, setEditPaymentVisible] = useState(false);
@@ -39,6 +56,11 @@ export default function PartyDetailScreen({ route }) {
   const [selectedSizes, setSelectedSizes] = useState([]);
   const [selectedColors, setSelectedColors] = useState([]);
   const [selectedStyleNos, setSelectedStyleNos] = useState([]);
+  const [costingModalVisible, setCostingModalVisible] = useState(false);
+  const [costingItem, setCostingItem] = useState(null);
+  const [costingSheet, setCostingSheet] = useState([]);
+  const [profitMargin, setProfitMargin] = useState('');
+  const [newCostLabel, setNewCostLabel] = useState('');
   const { width } = useWindowDimensions();
   const isDesktop = width > 768;
 
@@ -46,8 +68,12 @@ export default function PartyDetailScreen({ route }) {
     name: '', category: 'Fabric', quantity: '', unit: '', unit_price: '', notes: ''
   });
   const [itemForm, setItemForm] = useState({
-    style_no: '', description: '', color: '', size: '', price: '', image_url: ''
+    style_no: '', description: '', colors: [], sizes: [], image_url: ''
   });
+  const [itemColors, setItemColors] = useState([]);
+  const [itemSizes, setItemSizes] = useState([]);
+  const [newItemColor, setNewItemColor] = useState('');
+  const [newItemSize, setNewItemSize] = useState('');
   const [invForm, setInvForm] = useState({
     invoice_no: '', issue_date: '', due_date: '',
     advance: '0', freight_charges: '0', amount_paid: '0',
@@ -60,13 +86,22 @@ export default function PartyDetailScreen({ route }) {
   const [newPaymentForm, setNewPaymentForm] = useState({
     account_id: '', account_name: '', amount: '', date: '', notes: ''
   });
+  const [poForm, setPoForm] = useState({
+    po_number: '', po_date: '', article_name: '',
+    fabric_details: '', status: 'Pending', notes: ''
+  });
+  const [poItems, setPoItems] = useState([{
+    id: Date.now(), style_no: '', description: '', color: '', sizes: {}, total_pieces: 0
+  }]);
+  const [poSizeNumbers, setPoSizeNumbers] = useState(['50', '52', '54']);
+  const [newPoSizeNumber, setNewPoSizeNumber] = useState('');
 
   useEffect(() => { fetchAll(); fetchCategories(); }, [activeTab]);
 
   useEffect(() => {
     let result = items;
-    if (selectedSizes.length > 0) result = result.filter(i => selectedSizes.includes(i.size));
-    if (selectedColors.length > 0) result = result.filter(i => selectedColors.includes(i.color));
+    if (selectedSizes.length > 0) result = result.filter(i => i.sizes && selectedSizes.some(s => i.sizes.includes(s)));
+    if (selectedColors.length > 0) result = result.filter(i => i.colors && selectedColors.some(c => i.colors.includes(c)));
     if (selectedStyleNos.length > 0) result = result.filter(i => selectedStyleNos.includes(i.style_no));
     setFilteredItems(result);
   }, [selectedSizes, selectedColors, selectedStyleNos, items]);
@@ -85,28 +120,19 @@ export default function PartyDetailScreen({ route }) {
   useEffect(() => {
     if (activeTab !== 'Ledger') return;
     const debits = invoices.map(inv => ({
-      date: inv.issue_date,
-      particular: inv.invoice_no,
-      bil: inv.invoice_no,
-      debit: parseFloat(inv.total || 0),
-      credit: 0,
-      type: 'invoice'
+      date: inv.issue_date, particular: inv.invoice_no,
+      bil: inv.invoice_no, debit: parseFloat(inv.total || 0), credit: 0,
     }));
     const credits = payments.map(pay => ({
-      date: pay.date,
-      particular: `Payment — ${pay.account_name}`,
-      bil: '',
-      debit: 0,
-      credit: parseFloat(pay.amount || 0),
-      type: 'payment'
+      date: pay.date, particular: `Payment — ${pay.account_name}`,
+      bil: '', debit: 0, credit: parseFloat(pay.amount || 0),
     }));
     const all = [...debits, ...credits].sort((a, b) => new Date(a.date) - new Date(b.date));
     let balance = 0;
-    const withBalance = all.map(entry => {
+    setLedgerEntries(all.map(entry => {
       balance += entry.debit - entry.credit;
       return { ...entry, balance };
-    });
-    setLedgerEntries(withBalance);
+    }));
   }, [invoices, payments, activeTab]);
 
   const getMonthYear = (dateStr) => {
@@ -116,10 +142,8 @@ export default function PartyDetailScreen({ route }) {
   };
 
   const uniqueMonths = [...new Set(
-    invoices
-      .filter(i => (i.shipment_type || 'Air') === activeInvoiceTab)
-      .map(i => getMonthYear(i.issue_date))
-      .filter(Boolean)
+    invoices.filter(i => (i.shipment_type || 'Air') === activeInvoiceTab)
+      .map(i => getMonthYear(i.issue_date)).filter(Boolean)
   )];
 
   const fetchCategories = async () => {
@@ -166,8 +190,7 @@ export default function PartyDetailScreen({ route }) {
           client.get('/invoices'),
           client.get(`/party-payments/${party.id}`)
         ]);
-        const partyInvoices = invRes.data.filter(i => String(i.party_id) === String(party.id));
-        setInvoices(partyInvoices);
+        setInvoices(invRes.data.filter(i => String(i.party_id) === String(party.id)));
         setPayments(payRes.data);
       } else if (activeTab === 'Accounts') {
         const [accRes, payRes] = await Promise.all([
@@ -176,13 +199,16 @@ export default function PartyDetailScreen({ route }) {
         ]);
         setAccounts(accRes.data);
         setPayments(payRes.data);
+      } else if (activeTab === 'PO') {
+        const res = await client.get(`/purchase-orders/party/${party.id}`);
+        setPurchaseOrders(res.data);
       }
     } catch (err) { console.log(err.message); }
     finally { setLoading(false); }
   };
 
-  const uniqueSizes = [...new Set(items.map(i => i.size).filter(Boolean))];
-  const uniqueColors = [...new Set(items.map(i => i.color).filter(Boolean))];
+  const uniqueSizes = [...new Set(items.flatMap(i => i.sizes || []).filter(Boolean))];
+  const uniqueColors = [...new Set(items.flatMap(i => i.colors || []).filter(Boolean))];
   const uniqueStyleNos = [...new Set(items.map(i => i.style_no).filter(Boolean))];
 
   const toggleFilter = (value, selected, setSelected) => {
@@ -199,14 +225,14 @@ export default function PartyDetailScreen({ route }) {
   const invTotal = invSubtotal + invFreight - invAdvance;
   const invAmountPaid = parseFloat(invForm.amount_paid || 0);
   const invRemaining = invTotal - invAmountPaid;
-
   const filteredTotal = filteredInvoices.reduce((s, i) => s + parseFloat(i.total || 0), 0);
   const filteredPaid = filteredInvoices.reduce((s, i) => s + parseFloat(i.amount_paid || 0), 0);
   const filteredRemaining = filteredTotal - filteredPaid;
-
   const totalDebit = ledgerEntries.reduce((s, e) => s + e.debit, 0);
   const totalCredit = ledgerEntries.reduce((s, e) => s + e.credit, 0);
   const finalBalance = totalDebit - totalCredit;
+  const totalCost = costingSheet.reduce((sum, c) => sum + parseFloat(c.amount || 0), 0);
+  const sellingPrice = totalCost + parseFloat(profitMargin || 0);
 
   const formatDate = (d) => d ? d.toString().split('T')[0] : '-';
   const statusLabel = (status) => {
@@ -215,61 +241,235 @@ export default function PartyDetailScreen({ route }) {
     return '⏳ Pending';
   };
 
+  // Costing sheet functions
+  const openCostingSheet = (item) => {
+    setCostingItem(item);
+    const saved = item.costing_sheet;
+    const parsed = typeof saved === 'string' ? JSON.parse(saved) : (saved || []);
+    if (parsed.length > 0) setCostingSheet(parsed);
+    else setCostingSheet(DEFAULT_COST_ITEMS.map(i => ({ ...i, amount: '' })));
+    setProfitMargin(String(item.profit_margin || ''));
+    setCostingModalVisible(true);
+  };
+
+  const updateCostItem = (id, field, value) => {
+    setCostingSheet(costingSheet.map(c => c.id === id ? { ...c, [field]: value } : c));
+  };
+
+  const addCustomCostItem = () => {
+    if (!newCostLabel.trim()) return;
+    setCostingSheet([...costingSheet, { id: String(Date.now()), label: newCostLabel.trim(), amount: '' }]);
+    setNewCostLabel('');
+  };
+
+  const removeCostItem = (id) => setCostingSheet(costingSheet.filter(c => c.id !== id));
+
+  const saveCostingSheet = async () => {
+    try {
+      await client.put(`/items/${costingItem.id}`, {
+        style_no: costingItem.style_no,
+        description: costingItem.description,
+        colors: costingItem.colors || [],
+        sizes: costingItem.sizes || [],
+        image_url: costingItem.image_url || '',
+        labour_price: costingItem.labour_price || 0,
+        costing_sheet: costingSheet,
+        profit_margin: parseFloat(profitMargin || 0),
+        selling_price: sellingPrice,
+        total_cost: totalCost
+      });
+      setCostingModalVisible(false);
+      setCostingItem(null);
+      fetchAll();
+    } catch (err) { alert('Could not save costing sheet'); }
+  };
+
+  const printCostingSheet = () => {
+    const rows = costingSheet.map(c =>
+      `<tr><td>${c.label}</td><td style="text-align:right">PKR ${parseInt(c.amount || 0).toLocaleString()}</td></tr>`
+    ).join('');
+    const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
+    win.document.write(`<!DOCTYPE html><html><head><title>Costing Sheet — ${costingItem.style_no}</title>
+      <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:32px;max-width:500px;margin:0 auto}.header{background:#1e1b4b;color:#fff;padding:20px;border-radius:8px;margin-bottom:20px;text-align:center}.header h2{font-size:20px;margin-bottom:4px}.header p{font-size:13px;color:#a5b4fc}table{width:100%;border-collapse:collapse;margin-bottom:16px}th{background:#f3f4f6;color:#374151;padding:10px 12px;text-align:left;font-size:13px;border-bottom:2px solid #e5e7eb}td{padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px}tr:nth-child(even){background:#f9fafb}.summary-row{display:flex;justify-content:space-between;padding:10px 12px;border-radius:6px;margin-bottom:8px}.selling-row{display:flex;justify-content:space-between;padding:16px;background:#1e1b4b;border-radius:8px;color:#fff;margin-top:8px}</style></head>
+      <body>
+        <div class="header"><h2> ${costingItem.style_no}</h2><p>${costingItem.description || ''} · ${party.name}</p></div>
+        <table><thead><tr><th>Cost Item</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows}</tbody></table>
+        <div class="summary-row" style="background:#f3f4f6"><span style="font-size:14px;font-weight:500">Total Cost</span><span style="font-size:16px;font-weight:bold;color:#1e1b4b">PKR ${totalCost.toLocaleString()}</span></div>
+        <div class="summary-row" style="background:#f0fdf4"><span style="font-size:14px">Profit Margin</span><span style="font-size:15px;font-weight:600;color:#16a34a">+ PKR ${parseInt(profitMargin || 0).toLocaleString()}</span></div>
+        <div class="selling-row"><div><div style="color:#a5b4fc;font-size:12px;letter-spacing:1px;margin-bottom:4px">SELLING PRICE</div></div><div style="font-size:24px;font-weight:bold">PKR ${sellingPrice.toLocaleString()}</div></div>
+      </body></html>`);
+    win.document.close();
+    win.print();
+    win.onafterprint = () => win.close();
+    setTimeout(() => window.focus(), 100); win.print();
+  };
+
+  // PO functions
+  const addPoItem = () => setPoItems([...poItems, { id: Date.now(), style_no: '', description: '', color: '', sizes: {}, total_pieces: 0 }]);
+  const removePoItem = (id) => { if (poItems.length === 1) return; setPoItems(poItems.filter(i => i.id !== id)); };
+  const updatePoItem = (id, field, value) => setPoItems(poItems.map(i => i.id === id ? { ...i, [field]: value } : i));
+
+  const updatePoSizeQty = (itemId, sizeNum, subSize, value) => {
+    setPoItems(poItems.map(item => {
+      if (item.id !== itemId) return item;
+      const newSizes = { ...item.sizes };
+      if (!newSizes[sizeNum]) newSizes[sizeNum] = {};
+      newSizes[sizeNum][subSize] = parseInt(value) || 0;
+      let total = 0;
+      Object.values(newSizes).forEach(sn => Object.values(sn).forEach(qty => { total += qty; }));
+      return { ...item, sizes: newSizes, total_pieces: total };
+    }));
+  };
+
+  const getPoSizeQty = (item, sizeNum, subSize) => {
+    if (!item.sizes || !item.sizes[sizeNum]) return '';
+    return item.sizes[sizeNum][subSize] ? String(item.sizes[sizeNum][subSize]) : '';
+  };
+
+  const getPoTotalPieces = () => poItems.reduce((sum, item) => sum + (item.total_pieces || 0), 0);
+
+  const openEditPO = async (po) => {
+    try {
+      const res = await client.get(`/purchase-orders/${po.id}`);
+      const full = res.data;
+      setEditingPO(full);
+      setPoForm({
+        po_number: full.po_number || '',
+        po_date: full.po_date ? full.po_date.toString().split('T')[0] : '',
+        article_name: full.article_name || '',
+        fabric_details: full.fabric_details || '',
+        status: full.status || 'Pending',
+        notes: full.notes || ''
+      });
+      const poItemsData = full.items || [];
+      setPoItems(poItemsData.map(i => ({
+        id: i.id || Date.now(),
+        style_no: i.style_no || '',
+        description: i.description || '',
+        color: i.color || '',
+        sizes: i.sizes || {},
+        total_pieces: i.total_pieces || 0
+      })));
+      const allSizeNums = new Set();
+      poItemsData.forEach(i => { if (i.sizes) Object.keys(i.sizes).forEach(sn => allSizeNums.add(sn)); });
+      if (allSizeNums.size > 0) setPoSizeNumbers([...allSizeNums].sort());
+      setPoModalVisible(true);
+    } catch (err) { alert('Could not load PO'); }
+  };
+
+  const openViewPO = async (po) => {
+    try {
+      const res = await client.get(`/purchase-orders/${po.id}`);
+      setViewPO(res.data);
+      setViewPOModalVisible(true);
+    } catch (err) { alert('Could not load PO'); }
+  };
+
+  const savePO = async () => {
+    if (!poForm.po_number || !poForm.po_date) { alert('PO number and date are required'); return; }
+    try {
+      const payload = {
+        ...poForm, party_id: party.id,
+        items: poItems.map(i => ({
+          style_no: i.style_no, description: i.description,
+          color: i.color, sizes: i.sizes, total_pieces: i.total_pieces || 0
+        }))
+      };
+      if (editingPO) {
+        await client.put(`/purchase-orders/${editingPO.id}`, payload);
+      } else {
+        await client.post('/purchase-orders', payload);
+      }
+      setPoModalVisible(false);
+      setEditingPO(null);
+      setPoForm({ po_number: '', po_date: '', article_name: '', fabric_details: '', status: 'Pending', notes: '' });
+      setPoItems([{ id: Date.now(), style_no: '', description: '', color: '', sizes: {}, total_pieces: 0 }]);
+      setPoSizeNumbers(['50', '52', '54']);
+      fetchAll();
+    } catch (err) { alert('Could not save PO'); }
+  };
+
+  const deletePO = async (id) => {
+    if (window.confirm('Delete this PO?')) {
+      try { await client.delete(`/purchase-orders/${id}`); fetchAll(); }
+      catch (err) { alert('Could not delete PO'); }
+    }
+  };
+
+  const printPO = async (po) => {
+    try {
+      const res = await client.get(`/purchase-orders/${po.id}`);
+      const full = res.data;
+      const allSizeNums = new Set();
+      full.items.forEach(i => { if (i.sizes) Object.keys(i.sizes).forEach(sn => allSizeNums.add(sn)); });
+      const sizeNums = [...allSizeNums].sort((a, b) => parseInt(a) - parseInt(b));
+      let sizeHeaderRow1 = '';
+      let sizeHeaderRow2 = '';
+      sizeNums.forEach(sn => {
+        const activeSubs = SIZES.filter(ss => full.items.some(i => i.sizes && i.sizes[sn] && i.sizes[sn][ss]));
+        const cols = activeSubs.length > 0 ? activeSubs : ['S', 'M'];
+        sizeHeaderRow1 += `<th colspan="${cols.length}" style="text-align:center;border:1px solid #1e1b4b">${sn}</th>`;
+        cols.forEach(ss => { sizeHeaderRow2 += `<th style="text-align:center;border:1px solid #ddd">${ss}</th>`; });
+      });
+      const rows = full.items.map((item, idx) => {
+        let sizeCells = '';
+        sizeNums.forEach(sn => {
+          const activeSubs = SIZES.filter(ss => full.items.some(i => i.sizes && i.sizes[sn] && i.sizes[sn][ss]));
+          const cols = activeSubs.length > 0 ? activeSubs : ['S', 'M'];
+          cols.forEach(ss => {
+            const qty = item.sizes && item.sizes[sn] && item.sizes[sn][ss] ? item.sizes[sn][ss] : '-';
+            sizeCells += `<td style="text-align:center;border:1px solid #ddd">${qty}</td>`;
+          });
+        });
+        return `<tr><td style="border:1px solid #ddd">${idx + 1}</td><td style="border:1px solid #ddd">${item.style_no || '-'}</td><td style="border:1px solid #ddd">${item.description || '-'}</td><td style="border:1px solid #ddd">${item.color || '-'}</td>${sizeCells}<td style="text-align:center;font-weight:bold;border:1px solid #ddd">${item.total_pieces || 0}</td></tr>`;
+      }).join('');
+      const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
+      win.document.write(`<!DOCTYPE html><html><head><title>PO — ${full.po_number}</title>
+        <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:24px;font-size:12px}.info{margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:4px 40px}.info-row{font-size:13px}.info-row span{font-weight:bold}h2{color:#1e1b4b;margin-bottom:12px;font-size:16px}table{width:100%;border-collapse:collapse;margin-top:8px}th{background:#1e1b4b;color:#fff;padding:6px 8px;font-size:11px;border:1px solid #1e1b4b}td{padding:6px 8px;font-size:11px;border:1px solid #ddd}tr:nth-child(even){background:#f9fafb}.total-row{margin-top:12px;text-align:right;font-size:14px;font-weight:bold;color:#1e1b4b}</style></head>
+        <body>
+          <h2><img src="data:image/png;base64,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" style="width:40px;height:40px;object-fit:contain;vertical-align:middle;margin-right:8px;background:#000;border-radius:4px;padding:2px;"/> RS APPARELS</h2> — Purchase Order</h2>
+          <div class="info">
+            <div class="info-row">PO Number: <span>${full.po_number}</span></div>
+            <div class="info-row">PO Date: <span>${full.po_date ? full.po_date.toString().split('T')[0] : '-'}</span></div>
+            <div class="info-row">Party: <span>${party.name}</span></div>
+            <div class="info-row">Status: <span>${full.status}</span></div>
+            <div class="info-row">Article: <span>${full.article_name || '-'}</span></div>
+            <div class="info-row">Fabric: <span>${full.fabric_details || '-'}</span></div>
+          </div>
+          <table><thead><tr><th rowspan="2">Sr#</th><th rowspan="2">Style</th><th rowspan="2">Item</th><th rowspan="2">Colours</th>${sizeHeaderRow1}<th rowspan="2" style="text-align:center">Total<br/>Pcs</th></tr><tr>${sizeHeaderRow2}</tr></thead>
+          <tbody>${rows}</tbody></table>
+          <div class="total-row">Total Pieces: ${full.total_pieces || 0}</div>
+          ${full.notes ? `<div style="margin-top:8px;font-size:12px;color:#666">Notes: ${full.notes}</div>` : ''}
+        </body></html>`);
+      win.document.close();
+    win.print();
+    win.onafterprint = () => win.close();
+    setTimeout(() => window.focus(), 100); win.print();
+    } catch (err) { alert('Could not print PO'); }
+  };
+
   const printLedger = () => {
     const rows = ledgerEntries.map(e =>
-      `<tr>
-        <td>${formatDate(e.date)}</td>
-        <td>${e.particular}</td>
-        <td>${e.bil || '-'}</td>
-        <td style="text-align:right;color:${e.debit > 0 ? '#1e1b4b' : '#ccc'}">${e.debit > 0 ? 'PKR ' + e.debit.toLocaleString() : '-'}</td>
-        <td style="text-align:right;color:${e.credit > 0 ? '#ef4444' : '#ccc'}">${e.credit > 0 ? 'PKR ' + e.credit.toLocaleString() : '-'}</td>
-        <td style="text-align:right;font-weight:600;color:#4361ee">PKR ${e.balance.toLocaleString()}</td>
-      </tr>`
+      `<tr><td>${formatDate(e.date)}</td><td>${e.particular}</td><td>${e.bil || '-'}</td>
+       <td style="text-align:right;color:${e.debit > 0 ? '#1e1b4b' : '#ccc'}">${e.debit > 0 ? 'PKR ' + e.debit.toLocaleString() : '-'}</td>
+       <td style="text-align:right;color:${e.credit > 0 ? '#ef4444' : '#ccc'}">${e.credit > 0 ? 'PKR ' + e.credit.toLocaleString() : '-'}</td>
+       <td style="text-align:right;font-weight:600;color:#4361ee">PKR ${e.balance.toLocaleString()}</td></tr>`
     ).join('');
-    const win = window.open('', '_blank');
+    const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
     win.document.write(`<!DOCTYPE html><html><head><title>Ledger — ${party.name}</title>
-      <style>
-        *{box-sizing:border-box;margin:0;padding:0}
-        body{font-family:Arial,sans-serif;padding:32px;max-width:900px;margin:0 auto}
-        h2{color:#1e1b4b;text-align:center;margin-bottom:4px}
-        h3{color:#666;text-align:center;font-size:14px;margin-bottom:20px}
-        table{width:100%;border-collapse:collapse}
-        th{background:#1e1b4b;color:#fff;padding:10px 12px;text-align:left;font-size:13px}
-        td{padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px}
-        tr:nth-child(even){background:#f9fafb}
-        .footer{display:flex;justify-content:space-between;margin-top:16px;padding-top:12px;border-top:2px solid #1e1b4b}
-        .footer-item{text-align:center;flex:1}
-        .footer-label{color:#666;font-size:12px;margin-bottom:4px}
-        .footer-value{font-size:18px;font-weight:bold}
-      </style></head>
-      <body>
-        <h2>${party.name}</h2>
-        <h3>Ledger Account</h3>
-        <table>
-          <thead><tr>
-            <th>Date</th><th>Particular</th><th>Bill #</th>
-            <th style="text-align:right">Debit</th>
-            <th style="text-align:right">Credit</th>
-            <th style="text-align:right">Balance</th>
-          </tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-        <div class="footer">
-          <div class="footer-item">
-            <div class="footer-label">Total Debit</div>
-            <div class="footer-value" style="color:#1e1b4b">PKR ${totalDebit.toLocaleString()}</div>
-          </div>
-          <div class="footer-item">
-            <div class="footer-label">Total Credit</div>
-            <div class="footer-value" style="color:#ef4444">PKR ${totalCredit.toLocaleString()}</div>
-          </div>
-          <div class="footer-item">
-            <div class="footer-label">Balance</div>
-            <div class="footer-value" style="color:#4361ee">PKR ${finalBalance.toLocaleString()}</div>
-          </div>
-        </div>
-      </body></html>`);
-    win.document.close(); win.print();
+      <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:32px;max-width:900px;margin:0 auto}h2{color:#1e1b4b;text-align:center;margin-bottom:4px}h3{color:#666;text-align:center;font-size:14px;margin-bottom:20px}table{width:100%;border-collapse:collapse}th{background:#1e1b4b;color:#fff;padding:10px 12px;text-align:left;font-size:13px}td{padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px}tr:nth-child(even){background:#f9fafb}.footer{display:flex;justify-content:space-between;margin-top:16px;padding-top:12px;border-top:2px solid #1e1b4b}.footer-item{text-align:center;flex:1}.footer-label{color:#666;font-size:12px;margin-bottom:4px}.footer-value{font-size:18px;font-weight:bold}</style></head>
+      <body><h2>${party.name}</h2><h3>Ledger Account</h3>
+      <table><thead><tr><th>Date</th><th>Particular</th><th>Bill #</th><th style="text-align:right">Debit</th><th style="text-align:right">Credit</th><th style="text-align:right">Balance</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      <div class="footer">
+        <div class="footer-item"><div class="footer-label">Total Debit</div><div class="footer-value" style="color:#1e1b4b">PKR ${totalDebit.toLocaleString()}</div></div>
+        <div class="footer-item"><div class="footer-label">Total Credit</div><div class="footer-value" style="color:#ef4444">PKR ${totalCredit.toLocaleString()}</div></div>
+        <div class="footer-item"><div class="footer-label">Balance</div><div class="footer-value" style="color:#4361ee">PKR ${finalBalance.toLocaleString()}</div></div>
+      </div></body></html>`);
+    win.document.close();
+    win.print();
+    win.onafterprint = () => win.close();
+    setTimeout(() => window.focus(), 100); win.print();
   };
 
   const printAccessories = () => {
@@ -280,33 +480,40 @@ export default function PartyDetailScreen({ route }) {
        <td style="text-align:right">PKR ${parseInt(a.unit_price || 0).toLocaleString()}</td>
        <td style="text-align:right">PKR ${(parseInt(a.unit_price || 0) * parseFloat(a.quantity || 0)).toLocaleString()}</td></tr>`
     ).join('');
-    const win = window.open('', '_blank');
+    const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
     win.document.write(`<!DOCTYPE html><html><head><title>Accessories</title>
       <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:32px;max-width:900px;margin:0 auto}h2{color:#1e1b4b;margin-bottom:8px}p{color:#666;font-size:13px;margin-bottom:16px}table{width:100%;border-collapse:collapse}th{background:#1e1b4b;color:#fff;padding:10px 12px;text-align:left;font-size:13px}td{padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px}tr:nth-child(even){background:#f9fafb}.sub{text-align:right;margin-top:16px;padding-top:12px;border-top:2px solid #1e1b4b}.sub-value{font-size:20px;font-weight:bold;color:#1e1b4b}</style></head>
-      <body><h2>✂️ Garments ERP — Accessories</h2>
+      <body><h2><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIgAAACACAYAAADQ6SE/AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAAEnQAABJ0Ad5mH3gAABQdSURBVHhe7Z15XFNnusd/OclJQhI2kbDJvlUFccW6MNBqtYiOt9a2Sj8zd+rUVjv2TmtrdaaL1Xtt7XSzrUuXuWM7bbWtrZ32ClZLb7UuWIq4oVKCG4sBQRFIQsg6fwCBvCc5BEwOBM6Xz/MBnpMTyDm/857nfd7nfY8AgBU8PE6gSAcPT3d4gfCwwguEhxVeIDys8ALhYYUXCA8rvEB4WOEFwsMKLxAeVniB8LDCC4SHFV4gPKzwAuFhhRcIDyu8QHhY4QXCwwovEB5WeIHwsMILhIcVXiA8rPAC4WGFFwgPK7xAeFjhBcLDisBTE6fCgqQID5KQ7lvmeHkT6eLxIG4TSM7tSsydooTCR4jEEXJys8dQVWuhaTWjpdWEkvImlFfrUOImEWWMC0VihAIhgWKE+NOwWM2wms2wWCyAteuwXVC3Qqc3Q2+y4IK6FRQlwK+VWjRrjXbv5424TSAAkBghQ/bk4chIDUToMPe3Hr3hZEUL8ovqsffnBnITK0nRw/DA7ERkjA2BjLbCajLCYjbCYjLBYjG1fzeb7QQCABQFSH1EkPrQkEhpSGUS+MglMEIEVbUOq18vwsmy63b7eANuFUh37p4UhD/MCkNIoJjcxClavRmbv6nGd7+wn5zkmCA89Z+TMTYpCBazARazCRaT4ZYF4iP3gUzhgznL9uFA0VW7fbwBjwkEABRSIV5/JB5xYVJykx0f/1BHulwiLU6BkEAaIQE9i3B/SSNe3VVFugEAj94/EY/cPwFWsxEWk9GhQE6UNUBV3YwWrRFWqwWwAmPiFAgNlEAZIOYF0lfkUiE+WpkIudR5hyn7hXOkq9dMGemLqSN9MXNsALkJAFBY1oL1O+wF4isX4/11v0VSTBAAMARysLgS+YcrcegUu4AVUiFmTQzC4hnhiIlQDCqBCAG8SDrdidFkRYBciORwKaxWq0PbcbB3cYIjqhsMKDzfgoITN5EaLUOATGh7f43ejNXbK2E0dV0LpDgAAFYLrBYL1PXNWP32UXyyV4XKOm3XdicYTFacr9Ri18FaaFpNyEgbDhEtAi0WgRbToMU0Pt1zAZdrWshdBzzOL2s3cvR8M4xGk1NzJ3U3jVj94RWoarS29399dw20erPd615ccYe9ODo4eLwKv3tuH0rK6slNLrGz4Cruf+4XtOjc+7n6C04EYrVaYTabnZq70eotePbjGlxQt6KwrAU/l9u3ArlzU5E1KcbOBwAHiyux6o0DaNHdWve0rFKD1ZvPkG6vhBOBnK3Uky6Po22z4JXdddicx2wJcnNSSRfU9S14cetPpLvPFBTVYVeB46DYm+BEIP3FtSYTtG0WO9+8O5IRFuxr5wOAtZsPoEVrIN23xBuflJEur2NQC8QR8+5IJl1Q17fg+Fn39zCq63T47LtLpNurGFICCQ9WYMKoMNKNHXmeixfe3VVOuryKISWQrPRo0gUAOFB0mXS5jVJVIw4dryXdXsOQEoij2AMArl7zbH5iw3snSJfXMKQEkuwg73H8nJp0uZ2fimtx8vytJwP7gyElkPGjQkkXZ9xscW8PiSuGjEB8ZT0P6PEwGTICSYoZRrqAjp4Nj3M4E4iA5as/CQv2ha+cb12cwZ1ABAKnxgVhLC1FVnos6eLpgDOBUEKhU+MCtltJVjpz4I6nHc4EIhRRTq2/yZoUw99mnMDZ2TlbpWe0HFy2IBN66OImxQwnXTxcCoSihBAKHdtAIFzpOMs61OFMIAKB80CVC8KC2efqeDrd7q1wJpD+bEF8ZWKEDXcepAKARttm+zk8iL0KfyjBnUCEFCiR0KF5mswJI0iXHer6Fvx6uWveTPbk4fhozRiMS/Sze91QhDuBUBSj5eCqBRk/Ukm67CCH++NCpYhRirFpeRI2LEmAwsfz/+NAhTuBCCmn5mkyJ0SSLjvIgqHoYBEMbQYY2gxIT5Thk2duw7RRQ7M18fzZsSGAQEA5NE/ywKxEKGQ06bax50A5I0ANklMwGU02kwireG7RCDy1INzudUMBz56dbgiFFIQioUPzFAoZjYfvGU26bWh0Bry2/YidLzVaxpi302mZoxV465Fo1lmCgw3OPqnAwa3Fk7cYhYzG1mcyoPBx3nrs2HOGUckeHSyC0WB0aiMCKby7LBKjo4ZGT8czZ8cBXAapChmNLU9PRUKkP7nJRvnl63jvi2LSDaW/c0F1IpNQWL84DHMnDv64hFOBkCl2T6TaM9KU+HJDFhIinZ88jc6Ap/62j3QDAGJCXB+TeWhGEB7PCYZcwtlh5BzOPhmZPXVnJlXhI8Ld6SF465HovlmCgw3OPqnAwa3Fk7cYhYzG1mcyoPBx3nrs2HOGUckeHSyC0WB0aiMCKby7LBKjo4ZGT8czZ8cBXAapChmNLU9PRUKkP7nJRvnl63jvi2LSDaW/c0F1IpNQWL84DHMnDv64" style="width:40px;height:40px;object-fit:contain;vertical-align:middle;margin-right:8px;background:#000;border-radius:4px;padding:2px;"/> RS APPARELS</h2> — Accessories</h2>
       <p>Party: <strong>${party.name}</strong> · Filter: ${activeFilter} · Total: ${data.length}</p>
       <table><thead><tr><th>Name</th><th>Category</th><th>Quantity</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total Price</th></tr></thead>
       <tbody>${rows}</tbody></table>
       <div class="sub">Subtotal: <span class="sub-value">PKR ${subtotalAmount.toLocaleString()}</span></div>
       </body></html>`);
-    win.document.close(); win.print();
+    win.document.close();
+    win.print();
+    win.onafterprint = () => win.close();
+    setTimeout(() => window.focus(), 100); win.print();
   };
 
   const printItems = () => {
     const data = filteredItems;
     const rows = data.map(i =>
       `<tr><td>${i.style_no}</td><td>${i.description || '-'}</td>
-       <td>${i.color || '-'}</td><td>${i.size || '-'}</td>
-       <td style="text-align:right">PKR ${parseInt(i.price || 0).toLocaleString()}</td></tr>`
+       <td>${(i.colors || []).join(', ') || '-'}</td>
+       <td>${(i.sizes || []).join(', ') || '-'}</td>
+       <td style="text-align:right">PKR ${parseInt(i.selling_price || 0).toLocaleString()}</td></tr>`
     ).join('');
-    const win = window.open('', '_blank');
+    const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
     win.document.write(`<!DOCTYPE html><html><head><title>Items</title>
       <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:32px;max-width:900px;margin:0 auto}h2{color:#1e1b4b;margin-bottom:8px}p{color:#666;font-size:13px;margin-bottom:16px}table{width:100%;border-collapse:collapse}th{background:#1e1b4b;color:#fff;padding:10px 12px;text-align:left;font-size:13px}td{padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px}tr:nth-child(even){background:#f9fafb}</style></head>
-      <body><h2>✂️ Garments ERP — Items / Styles</h2>
+      <body><h2><img src="data:image/png;base64,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" style="width:40px;height:40px;object-fit:contain;vertical-align:middle;margin-right:8px;background:#000;border-radius:4px;padding:2px;"/> RS APPARELS</h2> — Items / Styles</h2>
       <p>Party: <strong>${party.name}</strong> · Total: ${data.length}</p>
-      <table><thead><tr><th>Style No</th><th>Description</th><th>Color</th><th>Size</th><th style="text-align:right">Price</th></tr></thead>
+      <table><thead><tr><th>Style No</th><th>Description</th><th>Colors</th><th>Sizes</th><th style="text-align:right">Selling Price</th></tr></thead>
       <tbody>${rows}</tbody></table></body></html>`);
-    win.document.close(); win.print();
+    win.document.close();
+    win.print();
+    win.onafterprint = () => win.close();
+    setTimeout(() => window.focus(), 100); win.print();
   };
 
   const printAllInvoices = () => {
@@ -316,31 +523,31 @@ export default function PartyDetailScreen({ route }) {
     const remainAmt = totalAmt - paidAmt;
     const rows = data.map(i => {
       const rem = parseFloat(i.total || 0) - parseFloat(i.amount_paid || 0);
-      return `<tr>
-        <td>${i.invoice_no}</td>
-        <td>${i.issue_date ? i.issue_date.toString().split('T')[0] : '-'}</td>
+      return `<tr><td>${i.invoice_no}</td><td>${i.issue_date ? i.issue_date.toString().split('T')[0] : '-'}</td>
         <td style="text-align:right">PKR ${parseInt(i.subtotal || 0).toLocaleString()}</td>
         <td style="text-align:right;color:#16a34a">PKR ${parseInt(i.freight_charges || 0).toLocaleString()}</td>
         <td style="text-align:right;color:#ef4444">PKR ${parseInt(i.advance || 0).toLocaleString()}</td>
         <td style="text-align:right;font-weight:bold">PKR ${parseInt(i.total || 0).toLocaleString()}</td>
         <td style="text-align:right;color:#16a34a">PKR ${parseInt(i.amount_paid || 0).toLocaleString()}</td>
         <td style="text-align:right;color:${rem > 0 ? '#ef4444' : '#16a34a'}">PKR ${rem.toLocaleString()}</td>
-        <td>${statusLabel(i.status)}</td>
-      </tr>`;
+        <td>${statusLabel(i.status)}</td></tr>`;
     }).join('');
-    const win = window.open('', '_blank');
+    const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
     win.document.write(`<!DOCTYPE html><html><head><title>Invoices</title>
-      <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:32px;max-width:1100px;margin:0 auto}h2{color:#1e1b4b;margin-bottom:8px}p{color:#666;font-size:13px;margin-bottom:16px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#1e1b4b;color:#fff;padding:8px 10px;text-align:left}td{padding:8px 10px;border-bottom:1px solid #e5e7eb}tr:nth-child(even){background:#f9fafb}.summary{margin-top:16px;padding-top:12px;border-top:2px solid #1e1b4b;display:flex;justify-content:flex-end;gap:40px}.summary-item{text-align:right}.summary-label{font-size:12px;color:#666;margin-bottom:4px}.summary-value{font-size:16px;font-weight:bold}</style></head>
-      <body><h2>✂️ Garments ERP — Invoices (Shipment by Air)</h2>
-      <p>Party: <strong>${party.name}</strong> · Filter: ${selectedMonths.length > 0 ? selectedMonths.join(', ') : 'All'} · Total: ${data.length}</p>
-      <table><thead><tr><th>Invoice #</th><th>Date</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Freight (+)</th><th style="text-align:right">Advance (−)</th><th style="text-align:right">Total</th><th style="text-align:right">Paid</th><th style="text-align:right">Remaining</th><th>Status</th></tr></thead>
+      <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:32px;max-width:1100px;margin:0 auto}h2{color:#1e1b4b;margin-bottom:8px}p{color:#666;font-size:13px;margin-bottom:16px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#1e1b4b;color:#fff;padding:8px 10px;text-align:left}td{padding:8px 10px;border-bottom:1px solid #e5e7eb}tr:nth-child(even){background:#f9fafb}.summary{margin-top:16px;padding-top:12px;border-top:2px solid #1e1b4b;display:flex;justify-content:flex-end;gap:40px}.summary-item{text-align:right}.summary-label{font-size:12px;color:#666}.summary-value{font-size:16px;font-weight:bold}</style></head>
+      <body><h2><img src="data:image/png;base64,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" style="width:40px;height:40px;object-fit:contain;vertical-align:middle;margin-right:8px;background:#000;border-radius:4px;padding:2px;"/> RS APPARELS</h2> — Invoices</h2>
+      <p>Party: <strong>${party.name}</strong> · Total: ${data.length}</p>
+      <table><thead><tr><th>Invoice #</th><th>Date</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Freight</th><th style="text-align:right">Advance</th><th style="text-align:right">Total</th><th style="text-align:right">Paid</th><th style="text-align:right">Remaining</th><th>Status</th></tr></thead>
       <tbody>${rows}</tbody></table>
       <div class="summary">
         <div class="summary-item"><div class="summary-label">Total</div><div class="summary-value" style="color:#4361ee">PKR ${totalAmt.toLocaleString()}</div></div>
         <div class="summary-item"><div class="summary-label">Paid</div><div class="summary-value" style="color:#16a34a">PKR ${paidAmt.toLocaleString()}</div></div>
         <div class="summary-item"><div class="summary-label">Remaining</div><div class="summary-value" style="color:#ef4444">PKR ${remainAmt.toLocaleString()}</div></div>
       </div></body></html>`);
-    win.document.close(); win.print();
+    win.document.close();
+    win.print();
+    win.onafterprint = () => win.close();
+    setTimeout(() => window.focus(), 100); win.print();
   };
 
   const printInvoice = async (inv) => {
@@ -355,46 +562,13 @@ export default function PartyDetailScreen({ route }) {
          <td style="text-align:right">PKR ${parseInt(item.total || 0).toLocaleString()}</td></tr>`
       ).join('');
       const remaining = parseFloat(inv.total || 0) - parseFloat(inv.amount_paid || 0);
-      const win = window.open('', '_blank');
+      const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
       win.document.write(`<!DOCTYPE html><html><head><title>Invoice ${inv.invoice_no}</title>
-        <style>
-          *{box-sizing:border-box;margin:0;padding:0}
-          body{font-family:Arial,sans-serif;padding:32px;max-width:800px;margin:0 auto;color:#333}
-          .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:16px;border-bottom:2px solid #1e1b4b}
-          .company{font-size:20px;font-weight:bold;color:#1e1b4b}
-          .company-sub{font-size:13px;color:#888;margin-top:4px}
-          .inv-right{text-align:right}
-          .inv-title{font-size:32px;font-weight:bold;color:#4361ee}
-          .inv-status{font-size:14px;font-weight:600;margin-top:4px}
-          .info-row{display:flex;margin:20px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden}
-          .info-box{flex:1;padding:12px 16px;border-right:1px solid #e5e7eb}
-          .info-box:last-child{border-right:none}
-          .info-label{font-size:11px;color:#888;text-transform:uppercase;margin-bottom:4px}
-          .info-value{font-size:13px;font-weight:600;color:#1e1b4b}
-          table{width:100%;border-collapse:collapse;margin:16px 0}
-          th{background:#1e1b4b;color:#fff;padding:10px 12px;text-align:left;font-size:13px}
-          td{padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px}
-          tr:nth-child(even){background:#f9fafb}
-          .totals{margin-top:8px}
-          .trow{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f3f4f6}
-          .tlabel{color:#666;font-size:13px}
-          .tvalue{font-size:13px;font-weight:600;text-align:right}
-          .grand{border-top:2px solid #1e1b4b;border-bottom:2px solid #1e1b4b;padding:10px 0;margin:8px 0;background:#f8faff}
-          .grand .tlabel{font-size:16px;font-weight:bold;color:#1e1b4b}
-          .grand .tvalue{font-size:16px;font-weight:bold;color:#4361ee}
-          .freight .tvalue{color:#16a34a}
-          .advance .tvalue{color:#ef4444}
-          .rem .tlabel{color:#ef4444;font-weight:600}
-          .rem .tvalue{color:#ef4444;font-weight:bold;font-size:15px}
-        </style></head>
+        <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:32px;max-width:800px;margin:0 auto;color:#333}.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:16px;border-bottom:2px solid #1e1b4b}.company{font-size:20px;font-weight:bold;color:#1e1b4b}.inv-title{font-size:32px;font-weight:bold;color:#4361ee}.info-row{display:flex;margin:20px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden}.info-box{flex:1;padding:12px 16px;border-right:1px solid #e5e7eb}.info-box:last-child{border-right:none}.info-label{font-size:11px;color:#888;text-transform:uppercase;margin-bottom:4px}.info-value{font-size:13px;font-weight:600;color:#1e1b4b}table{width:100%;border-collapse:collapse;margin:16px 0}th{background:#1e1b4b;color:#fff;padding:10px 12px;text-align:left;font-size:13px}td{padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px}tr:nth-child(even){background:#f9fafb}.trow{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f3f4f6}.tlabel{color:#666;font-size:13px}.tvalue{font-size:13px;font-weight:600}.grand{border-top:2px solid #1e1b4b;border-bottom:2px solid #1e1b4b;padding:10px 0;margin:8px 0;background:#f8faff}.grand .tlabel{font-size:16px;font-weight:bold;color:#1e1b4b}.grand .tvalue{font-size:16px;font-weight:bold;color:#4361ee}</style></head>
         <body>
           <div class="header">
-            <div><div class="company">✂️ Garments ERP</div>
-            <div class="company-sub">Shipment by Air — ${party.name}</div></div>
-            <div class="inv-right">
-              <div class="inv-title">${inv.invoice_no}</div>
-              <div class="inv-status">${statusLabel(inv.status)}</div>
-            </div>
+            <div><div class="company">RS APPARELS</div><div style="font-size:13px;color:#888;margin-top:4px">${party.name}</div></div>
+            <div style="text-align:right"><div class="inv-title">${inv.invoice_no}</div><div style="font-size:14px;font-weight:600;margin-top:4px">${statusLabel(inv.status)}</div></div>
           </div>
           <div class="info-row">
             <div class="info-box"><div class="info-label">Party</div><div class="info-value">${party.name}</div></div>
@@ -403,19 +577,22 @@ export default function PartyDetailScreen({ route }) {
             <div class="info-box"><div class="info-label">Status</div><div class="info-value">${statusLabel(inv.status)}</div></div>
           </div>
           <table>
-            <thead><tr><th>Style / Color / Size</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th></tr></thead>
+            <thead><tr><th>Description</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th></tr></thead>
             <tbody>${rows || '<tr><td colspan="4" style="text-align:center;color:#888">No items</td></tr>'}</tbody>
           </table>
-          <div class="totals">
+          <div>
             <div class="trow"><span class="tlabel">Subtotal</span><span class="tvalue">PKR ${parseInt(inv.subtotal || 0).toLocaleString()}</span></div>
-            <div class="trow freight"><span class="tlabel">Freight Charges (+)</span><span class="tvalue">PKR ${parseInt(inv.freight_charges || 0).toLocaleString()}</span></div>
-            <div class="trow advance"><span class="tlabel">Advance (−)</span><span class="tvalue">PKR ${parseInt(inv.advance || 0).toLocaleString()}</span></div>
+            <div class="trow"><span class="tlabel">Freight (+)</span><span class="tvalue" style="color:#16a34a">PKR ${parseInt(inv.freight_charges || 0).toLocaleString()}</span></div>
+            <div class="trow"><span class="tlabel">Advance (−)</span><span class="tvalue" style="color:#ef4444">PKR ${parseInt(inv.advance || 0).toLocaleString()}</span></div>
             <div class="trow grand"><span class="tlabel">Total</span><span class="tvalue">PKR ${parseInt(inv.total || 0).toLocaleString()}</span></div>
             <div class="trow"><span class="tlabel">Amount Paid</span><span class="tvalue" style="color:#16a34a">PKR ${parseInt(inv.amount_paid || 0).toLocaleString()}</span></div>
-            <div class="trow rem"><span class="tlabel">Remaining</span><span class="tvalue">PKR ${remaining.toLocaleString()}</span></div>
+            <div class="trow"><span class="tlabel" style="color:#ef4444">Remaining</span><span class="tvalue" style="color:#ef4444">PKR ${remaining.toLocaleString()}</span></div>
           </div>
         </body></html>`);
-      win.document.close(); win.print();
+      win.document.close();
+    win.print();
+    win.onafterprint = () => win.close();
+    setTimeout(() => window.focus(), 100); win.print();
     } catch (err) { alert('Could not load invoice'); }
   };
 
@@ -438,27 +615,45 @@ export default function PartyDetailScreen({ route }) {
 
   const openAddItem = () => {
     setEditingItem(null);
-    setItemForm({ style_no: '', description: '', color: '', size: '', price: '', image_url: '' });
+    setItemForm({ style_no: '', description: '', image_url: '' });
+    setItemColors([]); setItemSizes([]);
+    setNewItemColor(''); setNewItemSize('');
     setModalVisible(true);
   };
 
   const openEditItem = (item) => {
     setEditingItem(item);
     setItemForm({
-      style_no: item.style_no || '', description: item.description || '',
-      color: item.color || '', size: item.size || '',
-      price: String(item.price || ''), image_url: item.image_url || ''
+      style_no: item.style_no || '',
+      description: item.description || '',
+      image_url: item.image_url || ''
     });
+    setItemColors(item.colors || []);
+    setItemSizes(item.sizes || []);
+    setNewItemColor(''); setNewItemSize('');
     setModalVisible(true);
   };
 
   const saveItem = async () => {
-    if (!itemForm.style_no || !itemForm.price) { alert('Style number and price are required'); return; }
+    if (!itemForm.style_no) { alert('Style number is required'); return; }
     try {
-      if (editingItem) await client.put(`/items/${editingItem.id}`, itemForm);
-      else await client.post('/items', { ...itemForm, party_id: party.id });
-      setModalVisible(false); setEditingItem(null);
-      setItemForm({ style_no: '', description: '', color: '', size: '', price: '', image_url: '' });
+      if (editingItem) {
+        await client.put(`/items/${editingItem.id}`, {
+          ...itemForm, colors: itemColors, sizes: itemSizes,
+          costing_sheet: editingItem.costing_sheet || [],
+          profit_margin: editingItem.profit_margin || 0,
+          selling_price: editingItem.selling_price || 0,
+          total_cost: editingItem.total_cost || 0,
+          labour_price: editingItem.labour_price || 0
+        });
+      } else {
+        await client.post('/items', {
+          ...itemForm, colors: itemColors, sizes: itemSizes,
+          party_id: party.id
+        });
+      }
+      setModalVisible(false);
+      setEditingItem(null);
       fetchAll();
     } catch (err) { alert('Could not save item'); }
   };
@@ -478,18 +673,26 @@ export default function PartyDetailScreen({ route }) {
       ));
     } else {
       setSelectedInvItems([...selectedInvItems, {
-        id: item.id, style_no: item.style_no,
-        description: item.description, color: item.color,
-        size: item.size, price: item.price, quantity: 1
+        id: item.id,
+        style_no: item.style_no,
+        description: item.description,
+        colors: item.colors || [],
+        sizes: item.sizes || [],
+        price: item.selling_price || 0,
+        selectedColor: (item.colors || [])[0] || '',
+        selectedSize: (item.sizes || [])[0] || '',
+        quantity: 1
       }]);
     }
   };
 
   const removeInvItem = (id) => setSelectedInvItems(selectedInvItems.filter(i => i.id !== id));
-
   const updateInvQty = (id, qty) => {
     if (qty < 1) return;
     setSelectedInvItems(selectedInvItems.map(i => i.id === id ? { ...i, quantity: qty } : i));
+  };
+  const updateInvItemField = (id, field, value) => {
+    setSelectedInvItems(selectedInvItems.map(i => i.id === id ? { ...i, [field]: value } : i));
   };
 
   const saveInvoice = async () => {
@@ -504,7 +707,7 @@ export default function PartyDetailScreen({ route }) {
         subtotal: invSubtotal, total: invTotal, advance: invAdvance,
         freight_charges: invFreight, amount_paid: invAmountPaid, remaining, status,
         items: selectedInvItems.map(i => ({
-          description: `${i.style_no}${i.color ? ' | Color: ' + i.color : ''}${i.size ? ' | Size: ' + i.size : ''}${i.description ? ' | ' + i.description : ''}`,
+          description: `${i.style_no}${i.selectedColor ? ' | ' + i.selectedColor : ''}${i.selectedSize ? ' | Size: ' + i.selectedSize : ''}${i.description ? ' | ' + i.description : ''}`,
           quantity: i.quantity, unit_price: i.price
         }))
       });
@@ -529,16 +732,11 @@ export default function PartyDetailScreen({ route }) {
       if (paid >= parseFloat(editingInvoice.total || 0) && parseFloat(editingInvoice.total || 0) > 0) status = 'Paid';
       else if (paid > 0) status = 'Partial';
       await client.put(`/invoices/${editingInvoice.id}`, {
-        invoice_no: editingInvoice.invoice_no,
-        type: editingInvoice.type || 'Sale',
-        party_id: editingInvoice.party_id,
-        issue_date: editingInvoice.issue_date,
-        due_date: editingInvoice.due_date,
-        subtotal: editingInvoice.subtotal,
-        discount: editingInvoice.discount || 0,
-        tax: editingInvoice.tax || 0,
-        total: editingInvoice.total,
-        paid: paid, status, notes: editingInvoice.notes,
+        invoice_no: editingInvoice.invoice_no, type: editingInvoice.type || 'Sale',
+        party_id: editingInvoice.party_id, issue_date: editingInvoice.issue_date,
+        due_date: editingInvoice.due_date, subtotal: editingInvoice.subtotal,
+        discount: editingInvoice.discount || 0, tax: editingInvoice.tax || 0,
+        total: editingInvoice.total, paid: paid, status, notes: editingInvoice.notes,
         amount_paid: paid, remaining,
         advance: editingInvoice.advance || 0,
         freight_charges: editingInvoice.freight_charges || 0,
@@ -583,12 +781,9 @@ export default function PartyDetailScreen({ route }) {
     try {
       const selectedAcc = accounts.find(a => String(a.id) === String(newPaymentForm.account_id));
       await client.post('/party-payments', {
-        party_id: party.id,
-        account_id: newPaymentForm.account_id,
+        party_id: party.id, account_id: newPaymentForm.account_id,
         account_name: selectedAcc ? `${selectedAcc.account_name} — ${selectedAcc.bank_name}` : newPaymentForm.account_name,
-        amount: newPaymentForm.amount,
-        date: newPaymentForm.date,
-        notes: newPaymentForm.notes
+        amount: newPaymentForm.amount, date: newPaymentForm.date, notes: newPaymentForm.notes
       });
       setPaymentModalVisible(false);
       setNewPaymentForm({ account_id: '', account_name: '', amount: '', date: '', notes: '' });
@@ -603,12 +798,11 @@ export default function PartyDetailScreen({ route }) {
     }
   };
 
-  const tabs = ['Accessories', 'Items', 'Invoices', 'Ledger', 'Accounts'];
+  const tabs = ['Accessories', 'Items', 'Invoices', 'Ledger', 'Accounts', 'PO'];
 
   return (
     <View style={styles.container}>
 
-      {/* Party header */}
       <View style={styles.partyHeader}>
         <Text style={styles.partyName}>{party.name}</Text>
         <View style={[styles.badge, party.type === 'Customer' ? styles.badgeCustomer : styles.badgeSupplier]}>
@@ -617,7 +811,6 @@ export default function PartyDetailScreen({ route }) {
         <Text style={styles.partyContact}>{party.contact_person} · {party.phone} · {party.city}</Text>
       </View>
 
-      {/* Tabs - scrollable */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll}>
         <View style={styles.tabs}>
           {tabs.map(tab => (
@@ -630,7 +823,6 @@ export default function PartyDetailScreen({ route }) {
         </View>
       </ScrollView>
 
-      {/* Invoice sub-tabs - outside ScrollView to avoid gap */}
       {activeTab === 'Invoices' && (
         <View style={styles.invoiceSubTabs}>
           <TouchableOpacity
@@ -646,13 +838,42 @@ export default function PartyDetailScreen({ route }) {
         </View>
       )}
 
-      {/* Top actions */}
       <View style={styles.topActions}>
-        {activeTab !== 'Ledger' && activeTab !== 'Invoices' && activeTab !== 'Accounts' && (
-          <TouchableOpacity style={styles.addBtn}
-            onPress={() => activeTab === 'Items' ? openAddItem() : setModalVisible(true)}>
-            <Text style={styles.addBtnText}>+ Add {activeTab === 'Items' ? 'Item' : 'Accessory'}</Text>
-          </TouchableOpacity>
+        {activeTab === 'Accessories' && (
+          <View style={styles.actionBtns}>
+            <TouchableOpacity style={styles.addBtn} onPress={() => setModalVisible(true)}>
+              <Text style={styles.addBtnText}>+ Add Accessory</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.filterBtn} onPress={() => setFilterModalVisible(true)}>
+              <Text style={styles.filterBtnText}>🔽 {activeFilter}</Text>
+            </TouchableOpacity>
+            {activeFilter !== 'All' && (
+              <TouchableOpacity style={styles.clearFilterBtn} onPress={() => setActiveFilter('All')}>
+                <Text style={styles.clearFilterText}>✕</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.printBtn} onPress={printAccessories}>
+              <Text style={styles.printBtnText}>🖨️ Print</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        {activeTab === 'Items' && (
+          <View style={styles.actionBtns}>
+            <TouchableOpacity style={styles.addBtn} onPress={openAddItem}>
+              <Text style={styles.addBtnText}>+ Add Item</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.filterBtn} onPress={() => setItemFilterModalVisible(true)}>
+              <Text style={styles.filterBtnText}>🔽 Filter {hasItemFilters ? `(${selectedSizes.length + selectedColors.length + selectedStyleNos.length})` : ''}</Text>
+            </TouchableOpacity>
+            {hasItemFilters && (
+              <TouchableOpacity style={styles.clearFilterBtn} onPress={clearItemFilters}>
+                <Text style={styles.clearFilterText}>✕</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.printBtn} onPress={printItems}>
+              <Text style={styles.printBtnText}>🖨️ Print</Text>
+            </TouchableOpacity>
+          </View>
         )}
         {activeTab === 'Invoices' && activeInvoiceTab === 'Air' && (
           <View style={styles.actionBtns}>
@@ -672,36 +893,6 @@ export default function PartyDetailScreen({ route }) {
             </TouchableOpacity>
           </View>
         )}
-        {activeTab === 'Accessories' && (
-          <View style={styles.actionBtns}>
-            <TouchableOpacity style={styles.filterBtn} onPress={() => setFilterModalVisible(true)}>
-              <Text style={styles.filterBtnText}>🔽 {activeFilter}</Text>
-            </TouchableOpacity>
-            {activeFilter !== 'All' && (
-              <TouchableOpacity style={styles.clearFilterBtn} onPress={() => setActiveFilter('All')}>
-                <Text style={styles.clearFilterText}>✕</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity style={styles.printBtn} onPress={printAccessories}>
-              <Text style={styles.printBtnText}>🖨️ Print</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        {activeTab === 'Items' && (
-          <View style={styles.actionBtns}>
-            <TouchableOpacity style={styles.filterBtn} onPress={() => setItemFilterModalVisible(true)}>
-              <Text style={styles.filterBtnText}>🔽 Filter {hasItemFilters ? `(${selectedSizes.length + selectedColors.length + selectedStyleNos.length})` : ''}</Text>
-            </TouchableOpacity>
-            {hasItemFilters && (
-              <TouchableOpacity style={styles.clearFilterBtn} onPress={clearItemFilters}>
-                <Text style={styles.clearFilterText}>✕</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity style={styles.printBtn} onPress={printItems}>
-              <Text style={styles.printBtnText}>🖨️ Print</Text>
-            </TouchableOpacity>
-          </View>
-        )}
         {activeTab === 'Ledger' && (
           <TouchableOpacity style={styles.printBtn} onPress={printLedger}>
             <Text style={styles.printBtnText}>🖨️ Print Ledger</Text>
@@ -716,6 +907,17 @@ export default function PartyDetailScreen({ route }) {
               <Text style={styles.addBtnText}>+ Add Payment</Text>
             </TouchableOpacity>
           </View>
+        )}
+        {activeTab === 'PO' && (
+          <TouchableOpacity style={styles.addBtn} onPress={() => {
+            setEditingPO(null);
+            setPoForm({ po_number: '', po_date: '', article_name: '', fabric_details: '', status: 'Pending', notes: '' });
+            setPoItems([{ id: Date.now(), style_no: '', description: '', color: '', sizes: {}, total_pieces: 0 }]);
+            setPoSizeNumbers(['50', '52', '54']);
+            setPoModalVisible(true);
+          }}>
+            <Text style={styles.addBtnText}>+ New PO</Text>
+          </TouchableOpacity>
         )}
       </View>
 
@@ -733,6 +935,7 @@ export default function PartyDetailScreen({ route }) {
                 <Text style={[styles.th, { flex: 1 }]}>Qty</Text>
                 {isDesktop && <Text style={[styles.th, { flex: 1 }]}>Unit Price</Text>}
                 {isDesktop && <Text style={[styles.th, { flex: 1 }]}>Total Price</Text>}
+                {isDesktop && <Text style={[styles.th, { flex: 1.2 }]}>Supplier</Text>}
                 {isDesktop && <Text style={[styles.th, { flex: 1.5 }]}>Notes</Text>}
                 <Text style={[styles.th, { flex: 0.5 }]}></Text>
               </View>
@@ -745,6 +948,7 @@ export default function PartyDetailScreen({ route }) {
                     <Text style={[styles.td, { flex: 1 }]}>{a.quantity} {a.unit}</Text>
                     {isDesktop && <Text style={[styles.td, { flex: 1 }]}>PKR {parseInt(a.unit_price || 0).toLocaleString()}</Text>}
                     {isDesktop && <Text style={[styles.td, { flex: 1 }]}>PKR {(parseInt(a.unit_price || 0) * parseFloat(a.quantity || 0)).toLocaleString()}</Text>}
+                    {isDesktop && <Text style={[styles.td, { flex: 1.2, color: '#666' }]}>{a.supplier_name || '-'}</Text>}
                     {isDesktop && <Text style={[styles.td, { flex: 1.5 }]}>{a.notes || '-'}</Text>}
                     <TouchableOpacity style={{ flex: 0.5 }} onPress={() => deleteAccessory(a.id)}>
                       <Text style={styles.del}>🗑️</Text>
@@ -767,27 +971,55 @@ export default function PartyDetailScreen({ route }) {
 
           {/* ITEMS TAB */}
           {activeTab === 'Items' && (
-            <View style={styles.tableContainer}>
-              <View style={styles.tableHeader}>
-                <Text style={[styles.th, { flex: 1.5 }]}>Style No</Text>
-                <Text style={[styles.th, { flex: 2 }]}>Description</Text>
-                <Text style={[styles.th, { flex: 1 }]}>Color</Text>
-                <Text style={[styles.th, { flex: 1 }]}>Size</Text>
-                <Text style={[styles.th, { flex: 1 }]}>Price</Text>
-                <Text style={[styles.th, { flex: 0.8 }]}></Text>
-              </View>
+            <View>
               {filteredItems.length === 0
-                ? <Text style={styles.empty}>No items found.</Text>
-                : filteredItems.map((item, i) => (
-                  <View key={item.id} style={[styles.tr, i % 2 === 0 && styles.trEven]}>
-                    <Text style={[styles.td, { flex: 1.5 }]}>{item.style_no}</Text>
-                    <Text style={[styles.td, { flex: 2 }]}>{item.description || '-'}</Text>
-                    <Text style={[styles.td, { flex: 1 }]}>{item.color || '-'}</Text>
-                    <Text style={[styles.td, { flex: 1 }]}>{item.size || '-'}</Text>
-                    <Text style={[styles.td, { flex: 1 }]}>PKR {parseInt(item.price || 0).toLocaleString()}</Text>
-                    <View style={{ flex: 0.8, flexDirection: 'row', gap: 6 }}>
-                      <TouchableOpacity onPress={() => openEditItem(item)}><Text style={styles.del}>✏️</Text></TouchableOpacity>
-                      <TouchableOpacity onPress={() => deleteItem(item.id)}><Text style={styles.del}>🗑️</Text></TouchableOpacity>
+                ? <Text style={styles.empty}>No items found. Click + Add Item to create one.</Text>
+                : filteredItems.map((item) => (
+                  <View key={item.id} style={styles.itemCard}>
+                    <View style={styles.itemCardTop}>
+                      <View style={{ flex: 1 }}>
+                        <View style={styles.itemCardHeader}>
+                          <Text style={styles.itemStyleNo}>{item.style_no}</Text>
+                          {item.selling_price > 0
+                            ? <View style={styles.itemPriceBadge}><Text style={styles.itemPriceBadgeText}>PKR {parseInt(item.selling_price).toLocaleString()}</Text></View>
+                            : <View style={styles.itemNoPriceBadge}><Text style={styles.itemNoPriceBadgeText}>No costing yet</Text></View>
+                          }
+                        </View>
+                        <Text style={styles.itemDesc2}>{item.description || '-'}</Text>
+                        {item.colors && item.colors.length > 0 && (
+                          <View style={styles.itemTagsRow}>
+                            {item.colors.map((c, i) => (
+                              <View key={i} style={styles.itemColorTag}><Text style={styles.itemColorTagText}>{c}</Text></View>
+                            ))}
+                          </View>
+                        )}
+                        {item.sizes && item.sizes.length > 0 && (
+                          <View style={styles.itemTagsRow}>
+                            {item.sizes.map((s, i) => (
+                              <View key={i} style={styles.itemSizeTag}><Text style={styles.itemSizeTagText}>{s}</Text></View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                      {item.total_cost > 0 && (
+                        <View style={styles.itemCostingInfo}>
+                          <Text style={styles.itemCostingLabel}>Cost</Text>
+                          <Text style={styles.itemCostingValue}>PKR {parseInt(item.total_cost).toLocaleString()}</Text>
+                          <Text style={styles.itemCostingLabel}>Margin</Text>
+                          <Text style={[styles.itemCostingValue, { color: '#16a34a' }]}>PKR {parseInt(item.profit_margin || 0).toLocaleString()}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <View style={styles.itemCardActions2}>
+                      <TouchableOpacity style={styles.itemCostingBtn} onPress={() => openCostingSheet(item)}>
+                        <Text style={styles.itemCostingBtnText}>📊 Costing Sheet</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.itemEditBtn} onPress={() => openEditItem(item)}>
+                        <Text style={styles.itemEditBtnText}>✏️ Edit</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.itemDelBtn} onPress={() => deleteItem(item.id)}>
+                        <Text style={styles.itemDelBtnText}>🗑️</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
                 ))
@@ -864,7 +1096,7 @@ export default function PartyDetailScreen({ route }) {
           {activeTab === 'Ledger' && (
             <View>
               {ledgerEntries.length === 0
-                ? <Text style={styles.empty}>No ledger entries yet. Add invoices or payments.</Text>
+                ? <Text style={styles.empty}>No ledger entries yet.</Text>
                 : (
                   <View style={styles.tableContainer}>
                     <View style={styles.tableHeader}>
@@ -916,7 +1148,7 @@ export default function PartyDetailScreen({ route }) {
             <View>
               <Text style={styles.sectionTitle}>Bank Accounts</Text>
               {accounts.length === 0
-                ? <Text style={styles.empty}>No accounts yet. Add one!</Text>
+                ? <Text style={styles.empty}>No accounts yet.</Text>
                 : accounts.map((acc, i) => (
                   <View key={acc.id} style={[styles.accountCard, i % 2 === 0 && styles.trEven]}>
                     <View style={styles.accountLeft}>
@@ -930,7 +1162,6 @@ export default function PartyDetailScreen({ route }) {
                   </View>
                 ))
               }
-
               <Text style={[styles.sectionTitle, { marginTop: 20 }]}>Payment History</Text>
               {payments.length === 0
                 ? <Text style={styles.empty}>No payments yet.</Text>
@@ -947,9 +1178,7 @@ export default function PartyDetailScreen({ route }) {
                       <View key={pay.id} style={[styles.tr, i % 2 === 0 && styles.trEven]}>
                         <Text style={[styles.td, { flex: 1.2 }]}>{formatDate(pay.date)}</Text>
                         <Text style={[styles.td, { flex: 2 }]}>{pay.account_name}</Text>
-                        <Text style={[styles.td, { flex: 1.5, color: '#ef4444', fontWeight: '600' }]}>
-                          PKR {parseInt(pay.amount || 0).toLocaleString()}
-                        </Text>
+                        <Text style={[styles.td, { flex: 1.5, color: '#ef4444', fontWeight: '600' }]}>PKR {parseInt(pay.amount || 0).toLocaleString()}</Text>
                         <Text style={[styles.td, { flex: 1.5 }]}>{pay.notes || '-'}</Text>
                         <TouchableOpacity style={{ flex: 0.5 }} onPress={() => deletePayment(pay.id)}>
                           <Text style={styles.del}>🗑️</Text>
@@ -964,6 +1193,46 @@ export default function PartyDetailScreen({ route }) {
                     </View>
                   </View>
                 )
+              }
+            </View>
+          )}
+
+          {/* PO TAB */}
+          {activeTab === 'PO' && (
+            <View>
+              {purchaseOrders.length === 0
+                ? <Text style={styles.empty}>No purchase orders yet. Click + New PO to create one.</Text>
+                : purchaseOrders.map((po) => (
+                  <View key={po.id} style={styles.poCard}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.poNumber}>{po.po_number}</Text>
+                      <Text style={styles.poArticle}>{po.article_name || '-'}</Text>
+                      <Text style={styles.poDateText}>{po.po_date ? po.po_date.toString().split('T')[0] : '-'}</Text>
+                    </View>
+                    <View style={styles.poRight}>
+                      <View style={[styles.poBadge,
+                        po.status === 'Completed' ? styles.poCompleted :
+                        po.status === 'In Progress' ? styles.poInProgress : styles.poPending]}>
+                        <Text style={styles.poBadgeText}>{po.status}</Text>
+                      </View>
+                      <Text style={styles.poPieces}>{po.total_pieces} pcs</Text>
+                      <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
+                        <TouchableOpacity style={styles.printBtn} onPress={() => openViewPO(po)}>
+                          <Text style={styles.printBtnText}>👁️</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.printBtn} onPress={() => openEditPO(po)}>
+                          <Text style={styles.printBtnText}>✏️</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.printBtn} onPress={() => printPO(po)}>
+                          <Text style={styles.printBtnText}>🖨️</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.clearFilterBtn} onPress={() => deletePO(po.id)}>
+                          <Text style={styles.clearFilterText}>🗑️</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                ))
               }
             </View>
           )}
@@ -1024,20 +1293,67 @@ export default function PartyDetailScreen({ route }) {
         <Modal visible={modalVisible} animationType="slide" transparent>
           <View style={styles.modalOverlay}>
             <View style={[styles.modal, isDesktop && styles.modalDesktop]}>
-              <Text style={styles.modalTitle}>{editingItem ? 'Edit Item' : 'Add Item / Style'}</Text>
+              <Text style={styles.modalTitle}>{editingItem ? 'Edit Item' : 'Add Item'}</Text>
               <ScrollView>
-                <TextInput style={styles.input} placeholder="Style number * (e.g. ST-001)"
+                <TextInput style={styles.input} placeholder="Style number * (e.g. ASM-265)"
                   value={itemForm.style_no} onChangeText={(v) => setItemForm({ ...itemForm, style_no: v })} />
                 <TextInput style={styles.input} placeholder="Description"
                   value={itemForm.description} onChangeText={(v) => setItemForm({ ...itemForm, description: v })} />
-                <TextInput style={styles.input} placeholder="Color"
-                  value={itemForm.color} onChangeText={(v) => setItemForm({ ...itemForm, color: v })} />
-                <TextInput style={styles.input} placeholder="Size (e.g. S, M, L, XL)"
-                  value={itemForm.size} onChangeText={(v) => setItemForm({ ...itemForm, size: v })} />
-                <TextInput style={styles.input} placeholder="Price (PKR) *"
-                  value={itemForm.price} onChangeText={(v) => setItemForm({ ...itemForm, price: v })} keyboardType="numeric" />
                 <TextInput style={styles.input} placeholder="Image URL (optional)"
                   value={itemForm.image_url} onChangeText={(v) => setItemForm({ ...itemForm, image_url: v })} />
+
+                <Text style={styles.label}>Colors</Text>
+                <View style={styles.itemTagsRow}>
+                  {itemColors.map((c, i) => (
+                    <TouchableOpacity key={i} style={styles.itemColorTag}
+                      onPress={() => setItemColors(itemColors.filter((_, idx) => idx !== i))}>
+                      <Text style={styles.itemColorTagText}>{c} ✕</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={styles.addTagRow}>
+                  <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                    placeholder="Add color (e.g. White/G)" value={newItemColor} onChangeText={setNewItemColor} />
+                  <TouchableOpacity style={styles.addTagBtn}
+                    onPress={() => { if (newItemColor.trim()) { setItemColors([...itemColors, newItemColor.trim()]); setNewItemColor(''); } }}>
+                    <Text style={styles.addTagBtnText}>+ Add</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={[styles.label, { marginTop: 12 }]}>Sizes</Text>
+                <View style={styles.predefinedSizes}>
+                  {['S', 'M', 'L', 'XL', 'XXL', '50', '52', '54', '56', '58', '60'].map(s => (
+                    <TouchableOpacity key={s}
+                      style={[styles.preSize, itemSizes.includes(s) && styles.preSizeActive]}
+                      onPress={() => {
+                        if (itemSizes.includes(s)) setItemSizes(itemSizes.filter(x => x !== s));
+                        else setItemSizes([...itemSizes, s]);
+                      }}>
+                      <Text style={[styles.preSizeText, itemSizes.includes(s) && styles.preSizeTextActive]}>{s}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={styles.addTagRow}>
+                  <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                    placeholder="Custom size" value={newItemSize} onChangeText={setNewItemSize} />
+                  <TouchableOpacity style={styles.addTagBtn}
+                    onPress={() => { if (newItemSize.trim()) { setItemSizes([...itemSizes, newItemSize.trim()]); setNewItemSize(''); } }}>
+                    <Text style={styles.addTagBtnText}>+ Add</Text>
+                  </TouchableOpacity>
+                </View>
+                {itemSizes.length > 0 && (
+                  <View style={[styles.itemTagsRow, { marginTop: 8 }]}>
+                    {itemSizes.map((s, i) => (
+                      <TouchableOpacity key={i} style={styles.itemSizeTag}
+                        onPress={() => setItemSizes(itemSizes.filter((_, idx) => idx !== i))}>
+                        <Text style={styles.itemSizeTagText}>{s} ✕</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+                <View style={styles.noteBox}>
+                  <Text style={styles.noteText}>💡 After saving, open Costing Sheet to set the selling price.</Text>
+                </View>
               </ScrollView>
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.cancelBtn} onPress={() => { setModalVisible(false); setEditingItem(null); }}>
@@ -1059,12 +1375,13 @@ export default function PartyDetailScreen({ route }) {
             <View style={[styles.modal, isDesktop && styles.modalDesktop]}>
               <Text style={styles.modalTitle}>✈️ New Air Invoice — {party.name}</Text>
               <ScrollView>
-                <TextInput style={styles.input} placeholder="Invoice number * (e.g. INV-001)"
+                <TextInput style={styles.input} placeholder="Invoice number *"
                   value={invForm.invoice_no} onChangeText={(v) => setInvForm({ ...invForm, invoice_no: v })} />
                 <DatePicker label="Issue Date *" value={invForm.issue_date}
-                    onChange={(v) => setInvForm({ ...invForm, issue_date: v })} />
+                  onChange={(v) => setInvForm({ ...invForm, issue_date: v })} />
                 <DatePicker label="Due Date" value={invForm.due_date}
-                    onChange={(v) => setInvForm({ ...invForm, due_date: v })} />
+                  onChange={(v) => setInvForm({ ...invForm, due_date: v })} />
+
                 <Text style={styles.label}>Select Items / Styles</Text>
                 {allItems.length === 0
                   ? <Text style={{ color: '#888', fontSize: 13, marginBottom: 10 }}>No items for this party yet.</Text>
@@ -1073,24 +1390,45 @@ export default function PartyDetailScreen({ route }) {
                       {allItems.map((item) => (
                         <TouchableOpacity key={item.id} style={styles.styleBtn} onPress={() => addInvItem(item)}>
                           <Text style={styles.styleBtnNo}>{item.style_no}</Text>
-                          <Text style={styles.styleBtnColor}>{item.color || ''}{item.size ? ` · ${item.size}` : ''}</Text>
-                          <Text style={styles.styleBtnPrice}>PKR {parseInt(item.price).toLocaleString()}</Text>
+                          <Text style={styles.styleBtnColor}>{item.description || ''}</Text>
+                          <Text style={styles.styleBtnPrice}>PKR {parseInt(item.selling_price || 0).toLocaleString()}</Text>
                         </TouchableOpacity>
                       ))}
                     </ScrollView>
                   )
                 }
+
                 {selectedInvItems.length > 0 && (
                   <View style={styles.selectedItems}>
                     <Text style={styles.label}>Selected Items</Text>
                     {selectedInvItems.map((item) => (
                       <View key={item.id} style={styles.selectedItem}>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.selectedItemName}>
-                            {item.style_no}{item.color ? ` · ${item.color}` : ''}{item.size ? ` · ${item.size}` : ''}
-                          </Text>
+                          <Text style={styles.selectedItemName}>{item.style_no}</Text>
+                          <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                            {item.colors && item.colors.length > 0 && (
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                {item.colors.map(c => (
+                                  <TouchableOpacity key={c}
+                                    style={[styles.invColorBtn, item.selectedColor === c && styles.invColorBtnActive]}
+                                    onPress={() => updateInvItemField(item.id, 'selectedColor', c)}>
+                                    <Text style={[styles.invColorBtnText, item.selectedColor === c && styles.invColorBtnTextActive]}>{c}</Text>
+                                  </TouchableOpacity>
+                                ))}
+                              </ScrollView>
+                            )}
+                          </View>
+                          <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                            {item.sizes && item.sizes.map(s => (
+                              <TouchableOpacity key={s}
+                                style={[styles.invSizeBtn, item.selectedSize === s && styles.invSizeBtnActive]}
+                                onPress={() => updateInvItemField(item.id, 'selectedSize', s)}>
+                                <Text style={[styles.invSizeBtnText, item.selectedSize === s && styles.invSizeBtnTextActive]}>{s}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
                           <Text style={styles.selectedItemPrice}>
-                            PKR {parseInt(item.price).toLocaleString()} × {item.quantity} = PKR {parseInt(item.price * item.quantity).toLocaleString()}
+                            PKR {parseInt(item.price || 0).toLocaleString()} × {item.quantity} = PKR {parseInt((item.price || 0) * item.quantity).toLocaleString()}
                           </Text>
                         </View>
                         <View style={styles.qtyControls}>
@@ -1100,10 +1438,7 @@ export default function PartyDetailScreen({ route }) {
                           <TextInput
                             style={styles.qtyInput}
                             value={String(item.quantity)}
-                            onChangeText={(v) => {
-                              const num = parseInt(v);
-                              if (!isNaN(num) && num > 0) updateInvQty(item.id, num);
-                            }}
+                            onChangeText={(v) => { const num = parseInt(v); if (!isNaN(num) && num > 0) updateInvQty(item.id, num); }}
                             keyboardType="numeric"
                           />
                           <TouchableOpacity style={styles.qtyBtn} onPress={() => updateInvQty(item.id, item.quantity + 1)}>
@@ -1117,14 +1452,15 @@ export default function PartyDetailScreen({ route }) {
                     ))}
                   </View>
                 )}
+
                 <View style={styles.totalsBox}>
                   <View style={styles.totalRow}>
                     <Text style={styles.totalLabel}>Subtotal</Text>
                     <Text style={styles.totalValue}>PKR {invSubtotal.toLocaleString()}</Text>
                   </View>
-                  <TextInput style={styles.input} placeholder="Freight Charges PKR (added to total)"
+                  <TextInput style={styles.input} placeholder="Freight Charges PKR"
                     value={invForm.freight_charges} onChangeText={(v) => setInvForm({ ...invForm, freight_charges: v })} keyboardType="numeric" />
-                  <TextInput style={styles.input} placeholder="Advance PKR (subtracted from total)"
+                  <TextInput style={styles.input} placeholder="Advance PKR"
                     value={invForm.advance} onChangeText={(v) => setInvForm({ ...invForm, advance: v })} keyboardType="numeric" />
                   <View style={[styles.totalRow, { borderTopWidth: 1, borderTopColor: '#e5e7eb', paddingTop: 8, marginTop: 4 }]}>
                     <Text style={[styles.totalLabel, { fontWeight: 'bold', color: '#1e1b4b', fontSize: 15 }]}>Total</Text>
@@ -1141,8 +1477,7 @@ export default function PartyDetailScreen({ route }) {
                   value={invForm.notes} onChangeText={(v) => setInvForm({ ...invForm, notes: v })} />
               </ScrollView>
               <View style={styles.modalActions}>
-                <TouchableOpacity style={styles.cancelBtn}
-                  onPress={() => { setModalVisible(false); setSelectedInvItems([]); }}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={() => { setModalVisible(false); setSelectedInvItems([]); }}>
                   <Text style={styles.cancelText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.saveBtn} onPress={saveInvoice}>
@@ -1204,10 +1539,10 @@ export default function PartyDetailScreen({ route }) {
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, isDesktop && { width: 400, borderRadius: 16, marginBottom: 40 }]}>
             <Text style={styles.modalTitle}>Add Bank Account</Text>
-            <TextInput style={styles.input} placeholder="Account name * (e.g. A.R acc)"
+            <TextInput style={styles.input} placeholder="Account name *"
               value={accountForm.account_name}
               onChangeText={(v) => setAccountForm({ ...accountForm, account_name: v })} />
-            <TextInput style={styles.input} placeholder="Bank name * (e.g. HBL, Meezan)"
+            <TextInput style={styles.input} placeholder="Bank name *"
               value={accountForm.bank_name}
               onChangeText={(v) => setAccountForm({ ...accountForm, bank_name: v })} />
             <TextInput style={styles.input} placeholder="Account number *"
@@ -1232,7 +1567,7 @@ export default function PartyDetailScreen({ route }) {
             <Text style={styles.modalTitle}>Add Payment Received</Text>
             <Text style={styles.label}>Select Account *</Text>
             {accounts.length === 0
-              ? <Text style={{ color: '#888', fontSize: 13, marginBottom: 10 }}>No accounts yet. Add an account first.</Text>
+              ? <Text style={{ color: '#888', fontSize: 13, marginBottom: 10 }}>No accounts yet.</Text>
               : accounts.map(acc => (
                 <TouchableOpacity key={acc.id}
                   style={[styles.accountSelectBtn, String(newPaymentForm.account_id) === String(acc.id) && styles.accountSelectBtnActive]}
@@ -1248,7 +1583,7 @@ export default function PartyDetailScreen({ route }) {
               onChangeText={(v) => setNewPaymentForm({ ...newPaymentForm, amount: v })}
               keyboardType="numeric" />
             <DatePicker label="Payment Date *" value={newPaymentForm.date}
-                onChange={(v) => setNewPaymentForm({ ...newPaymentForm, date: v })} />
+              onChange={(v) => setNewPaymentForm({ ...newPaymentForm, date: v })} />
             <TextInput style={styles.input} placeholder="Notes (optional)"
               value={newPaymentForm.notes}
               onChangeText={(v) => setNewPaymentForm({ ...newPaymentForm, notes: v })} />
@@ -1260,6 +1595,322 @@ export default function PartyDetailScreen({ route }) {
                 <Text style={styles.saveText}>Save Payment</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* COSTING SHEET MODAL */}
+      <Modal visible={costingModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, isDesktop && styles.modalDesktop]}>
+            <Text style={styles.modalTitle}>📊 Costing Sheet — {costingItem?.style_no}</Text>
+            <Text style={styles.modalSub}>{costingItem?.description} · {party.name}</Text>
+            <ScrollView>
+              <View style={styles.costingTable}>
+                <View style={styles.costingTableHeader}>
+                  <Text style={[styles.costingTh, { flex: 2 }]}>Cost Item</Text>
+                  <Text style={[styles.costingTh, { flex: 1, textAlign: 'right' }]}>Amount (PKR)</Text>
+                  <Text style={[styles.costingTh, { width: 30 }]}></Text>
+                </View>
+                {costingSheet.map((item) => (
+                  <View key={item.id} style={styles.costingRow}>
+                    <TextInput style={[styles.costingLabelInput, { flex: 2 }]}
+                      value={item.label} onChangeText={(v) => updateCostItem(item.id, 'label', v)}
+                      placeholder="Cost item name" />
+                    <TextInput style={[styles.costingAmountInput, { flex: 1 }]}
+                      value={String(item.amount)} onChangeText={(v) => updateCostItem(item.id, 'amount', v)}
+                      keyboardType="numeric" placeholder="0" />
+                    <TouchableOpacity style={{ width: 30, alignItems: 'center' }} onPress={() => removeCostItem(item.id)}>
+                      <Text style={{ color: '#ef4444', fontSize: 16 }}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+              <View style={styles.addTagRow}>
+                <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                  placeholder="Add custom cost item (e.g. Embroidery)"
+                  value={newCostLabel} onChangeText={setNewCostLabel} />
+                <TouchableOpacity style={styles.addTagBtn} onPress={addCustomCostItem}>
+                  <Text style={styles.addTagBtnText}>+ Add</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.costingSummary}>
+                <View style={styles.costingSummaryRow}>
+                  <Text style={styles.costingSummaryLabel}>Total Cost</Text>
+                  <Text style={styles.costingSummaryValue}>PKR {totalCost.toLocaleString()}</Text>
+                </View>
+                <View style={[styles.costingSummaryRow, { marginTop: 10 }]}>
+                  <Text style={styles.costingSummaryLabel}>Profit Margin (PKR)</Text>
+                  <View style={styles.profitInputRow}>
+                    <Text style={styles.pKRLabel}>PKR</Text>
+                    <TextInput style={styles.profitInput}
+                      value={String(profitMargin)} onChangeText={setProfitMargin}
+                      keyboardType="numeric" placeholder="0" />
+                  </View>
+                </View>
+                {totalCost > 0 && parseFloat(profitMargin || 0) > 0 && (
+                  <Text style={styles.marginPercent}>
+                    {((parseFloat(profitMargin || 0) / totalCost) * 100).toFixed(1)}% profit margin
+                  </Text>
+                )}
+              </View>
+              <View style={styles.sellingPriceBox}>
+                <View>
+                  <Text style={styles.sellingPriceLabel}>SELLING PRICE</Text>
+                  <Text style={styles.sellingPriceSub}>PKR {totalCost.toLocaleString()} + PKR {parseInt(profitMargin || 0).toLocaleString()}</Text>
+                </View>
+                <Text style={styles.sellingPriceValue}>PKR {sellingPrice.toLocaleString()}</Text>
+              </View>
+            </ScrollView>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setCostingModalVisible(false)}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.saveBtn, { backgroundColor: '#16a34a', flex: 0.6 }]} onPress={printCostingSheet}>
+                <Text style={styles.saveText}>🖨️</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.saveBtn} onPress={saveCostingSheet}>
+                <Text style={styles.saveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* PO MODAL */}
+      <Modal visible={poModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, isDesktop && styles.modalDesktop]}>
+            <Text style={styles.modalTitle}>{editingPO ? '✏️ Edit PO' : '📋 New Purchase Order'} — {party.name}</Text>
+            <ScrollView>
+              <TextInput style={styles.input} placeholder="PO Number * (e.g. PO-001)"
+                value={poForm.po_number} onChangeText={(v) => setPoForm({ ...poForm, po_number: v })} />
+              <DatePicker label="PO Date *" value={poForm.po_date}
+                onChange={(v) => setPoForm({ ...poForm, po_date: v })} />
+              <TextInput style={styles.input} placeholder="Article name"
+                value={poForm.article_name} onChangeText={(v) => setPoForm({ ...poForm, article_name: v })} />
+              <TextInput style={styles.input} placeholder="Fabric details"
+                value={poForm.fabric_details} onChangeText={(v) => setPoForm({ ...poForm, fabric_details: v })} />
+              <Text style={styles.label}>Status</Text>
+              <View style={styles.typeRow}>
+                {['Pending', 'In Progress', 'Completed'].map(s => (
+                  <TouchableOpacity key={s}
+                    style={[styles.typeBtn, poForm.status === s && styles.typeBtnActive]}
+                    onPress={() => setPoForm({ ...poForm, status: s })}>
+                    <Text style={[styles.typeBtnText, poForm.status === s && styles.typeBtnTextActive]}>{s}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.label}>Size Numbers</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                {poSizeNumbers.map(sn => (
+                  <View key={sn} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#eef2ff', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, gap: 6 }}>
+                    <Text style={{ fontSize: 13, color: '#4361ee', fontWeight: '600' }}>{sn}</Text>
+                    <TouchableOpacity onPress={() => setPoSizeNumbers(poSizeNumbers.filter(s => s !== sn))}>
+                      <Text style={{ fontSize: 12, color: '#ef4444', fontWeight: 'bold' }}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+                <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                  placeholder="Add size number (e.g. 56)"
+                  value={newPoSizeNumber} onChangeText={setNewPoSizeNumber} keyboardType="numeric" />
+                <TouchableOpacity style={styles.addCategoryBtn}
+                  onPress={() => {
+                    if (!newPoSizeNumber.trim()) return;
+                    if (!poSizeNumbers.includes(newPoSizeNumber.trim())) setPoSizeNumbers([...poSizeNumbers, newPoSizeNumber.trim()]);
+                    setNewPoSizeNumber('');
+                  }}>
+                  <Text style={styles.addCategoryBtnText}>+ Add</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.label}>Items</Text>
+              {poItems.map((item, itemIdx) => (
+                <View key={item.id} style={{ backgroundColor: '#f8faff', borderRadius: 10, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#e0e7ff' }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#1e1b4b' }}>Item {itemIdx + 1}</Text>
+                    {poItems.length > 1 && (
+                      <TouchableOpacity onPress={() => removePoItem(item.id)}>
+                        <Text style={{ color: '#ef4444', fontSize: 13 }}>Remove</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <TextInput style={styles.input} placeholder="Style No"
+                    value={item.style_no} onChangeText={(v) => updatePoItem(item.id, 'style_no', v)} />
+                  <TextInput style={styles.input} placeholder="Description"
+                    value={item.description} onChangeText={(v) => updatePoItem(item.id, 'description', v)} />
+                  <TextInput style={styles.input} placeholder="Color"
+                    value={item.color} onChangeText={(v) => updatePoItem(item.id, 'color', v)} />
+                  <Text style={styles.label}>Quantities by Size</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                    <View>
+                      <View style={{ flexDirection: 'row' }}>
+                        <View style={{ width: 44, padding: 4, backgroundColor: '#1e1b4b', justifyContent: 'center', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 10, fontWeight: '600', color: '#fff' }}>Size</Text>
+                        </View>
+                        {SIZES.map(ss => (
+                          <View key={ss} style={{ width: 48, padding: 2, backgroundColor: '#2d2a6e', alignItems: 'center', justifyContent: 'center', minHeight: 32 }}>
+                            <Text style={{ fontSize: 10, fontWeight: '600', color: '#fff' }}>{ss}</Text>
+                          </View>
+                        ))}
+                        <View style={{ width: 52, padding: 4, backgroundColor: '#eef2ff', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 10, fontWeight: '600', color: '#4361ee' }}>Total</Text>
+                        </View>
+                      </View>
+                      {poSizeNumbers.map(sn => {
+                        const rowTotal = SIZES.reduce((sum, ss) =>
+                          sum + (item.sizes && item.sizes[sn] && item.sizes[sn][ss] ? item.sizes[sn][ss] : 0), 0);
+                        return (
+                          <View key={sn} style={{ flexDirection: 'row' }}>
+                            <View style={{ width: 44, padding: 4, backgroundColor: '#1e1b4b', justifyContent: 'center', alignItems: 'center' }}>
+                              <Text style={{ fontSize: 11, fontWeight: '600', color: '#fff' }}>{sn}</Text>
+                            </View>
+                            {SIZES.map(ss => (
+                              <View key={ss} style={{ width: 48, padding: 2, alignItems: 'center', justifyContent: 'center' }}>
+                                <TextInput
+                                  style={{ borderWidth: 1, borderColor: '#ddd', borderRadius: 4, padding: 3, fontSize: 11, textAlign: 'center', width: 44, backgroundColor: '#fff' }}
+                                  value={getPoSizeQty(item, sn, ss)}
+                                  onChangeText={(v) => updatePoSizeQty(item.id, sn, ss, v)}
+                                  keyboardType="numeric" placeholder="0"
+                                />
+                              </View>
+                            ))}
+                            <View style={{ width: 52, padding: 4, backgroundColor: '#eef2ff', alignItems: 'center', justifyContent: 'center' }}>
+                              <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#4361ee' }}>{rowTotal}</Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#4361ee', marginTop: 8, textAlign: 'right' }}>
+                    Total pieces: {item.total_pieces || 0}
+                  </Text>
+                </View>
+              ))}
+              <TouchableOpacity style={{ backgroundColor: '#eef2ff', borderRadius: 8, padding: 12, alignItems: 'center', marginBottom: 12, borderWidth: 1, borderColor: '#4361ee' }}
+                onPress={addPoItem}>
+                <Text style={{ color: '#4361ee', fontWeight: '600', fontSize: 13 }}>+ Add Another Color/Item</Text>
+              </TouchableOpacity>
+              <View style={{ backgroundColor: '#1e1b4b', borderRadius: 8, padding: 12, marginBottom: 12, alignItems: 'center' }}>
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Grand Total: {getPoTotalPieces()} pieces</Text>
+              </View>
+              <TextInput style={styles.input} placeholder="Notes"
+                value={poForm.notes} onChangeText={(v) => setPoForm({ ...poForm, notes: v })} />
+            </ScrollView>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setPoModalVisible(false); setEditingPO(null); }}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.saveBtn} onPress={savePO}>
+                <Text style={styles.saveText}>{editingPO ? 'Update PO' : 'Save PO'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* VIEW PO MODAL */}
+      <Modal visible={viewPOModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, isDesktop && styles.modalDesktop]}>
+            {viewPO && (
+              <>
+                <Text style={styles.modalTitle}>📋 {viewPO.po_number}</Text>
+                <ScrollView>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 16, backgroundColor: '#f8faff', borderRadius: 10, padding: 12 }}>
+                    <View style={{ width: '45%' }}>
+                      <Text style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>PO DATE</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: '#1e1b4b' }}>{viewPO.po_date ? viewPO.po_date.toString().split('T')[0] : '-'}</Text>
+                    </View>
+                    <View style={{ width: '45%' }}>
+                      <Text style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>STATUS</Text>
+                      <View style={[styles.poBadge, viewPO.status === 'Completed' ? styles.poCompleted : viewPO.status === 'In Progress' ? styles.poInProgress : styles.poPending]}>
+                        <Text style={styles.poBadgeText}>{viewPO.status}</Text>
+                      </View>
+                    </View>
+                    <View style={{ width: '45%' }}>
+                      <Text style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>ARTICLE</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: '#1e1b4b' }}>{viewPO.article_name || '-'}</Text>
+                    </View>
+                    <View style={{ width: '45%' }}>
+                      <Text style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>FABRIC</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: '#1e1b4b' }}>{viewPO.fabric_details || '-'}</Text>
+                    </View>
+                    <View style={{ width: '45%' }}>
+                      <Text style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>TOTAL PIECES</Text>
+                      <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#4361ee' }}>{viewPO.total_pieces}</Text>
+                    </View>
+                  </View>
+                  {viewPO.items && viewPO.items.map((item, idx) => {
+                    const allSizeNums = item.sizes ? Object.keys(item.sizes).sort((a, b) => parseInt(a) - parseInt(b)) : [];
+                    return (
+                      <View key={idx} style={{ backgroundColor: '#f8faff', borderRadius: 8, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#e0e7ff' }}>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: '#1e1b4b', marginBottom: 8 }}>
+                          {item.style_no} — {item.description} — {item.color}
+                        </Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                          <View>
+                            <View style={{ flexDirection: 'row' }}>
+                              <View style={{ width: 44, padding: 4, backgroundColor: '#1e1b4b', justifyContent: 'center', alignItems: 'center' }}>
+                                <Text style={{ fontSize: 10, fontWeight: '600', color: '#fff' }}>Size</Text>
+                              </View>
+                              {SIZES.map(ss => (
+                                <View key={ss} style={{ width: 48, padding: 2, backgroundColor: '#2d2a6e', alignItems: 'center', justifyContent: 'center', minHeight: 32 }}>
+                                  <Text style={{ fontSize: 10, fontWeight: '600', color: '#fff' }}>{ss}</Text>
+                                </View>
+                              ))}
+                              <View style={{ width: 52, padding: 4, backgroundColor: '#eef2ff', alignItems: 'center' }}>
+                                <Text style={{ fontSize: 10, fontWeight: '600', color: '#4361ee' }}>Total</Text>
+                              </View>
+                            </View>
+                            {allSizeNums.map(sn => {
+                              const rowTotal = SIZES.reduce((sum, ss) =>
+                                sum + (item.sizes[sn] && item.sizes[sn][ss] ? item.sizes[sn][ss] : 0), 0);
+                              return (
+                                <View key={sn} style={{ flexDirection: 'row' }}>
+                                  <View style={{ width: 44, padding: 4, backgroundColor: '#1e1b4b', justifyContent: 'center', alignItems: 'center' }}>
+                                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#fff' }}>{sn}</Text>
+                                  </View>
+                                  {SIZES.map(ss => (
+                                    <View key={ss} style={{ width: 48, padding: 6, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' }}>
+                                      <Text style={{ fontSize: 13, color: '#374151' }}>
+                                        {item.sizes[sn] && item.sizes[sn][ss] ? item.sizes[sn][ss] : '-'}
+                                      </Text>
+                                    </View>
+                                  ))}
+                                  <View style={{ width: 52, padding: 6, backgroundColor: '#eef2ff', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#4361ee' }}>{rowTotal}</Text>
+                                  </View>
+                                </View>
+                              );
+                            })}
+                          </View>
+                        </ScrollView>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: '#4361ee', marginTop: 8, textAlign: 'right' }}>
+                          Total: {item.total_pieces} pcs
+                        </Text>
+                      </View>
+                    );
+                  })}
+                  {viewPO.notes && (
+                    <View style={{ backgroundColor: '#fef3c7', borderRadius: 8, padding: 12, marginTop: 8 }}>
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: '#92400e', marginBottom: 4 }}>Notes:</Text>
+                      <Text style={{ fontSize: 13, color: '#92400e' }}>{viewPO.notes}</Text>
+                    </View>
+                  )}
+                </ScrollView>
+                <View style={styles.modalActions}>
+                  <TouchableOpacity style={styles.cancelBtn} onPress={() => setViewPOModalVisible(false)}>
+                    <Text style={styles.cancelText}>Close</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.saveBtn} onPress={() => printPO(viewPO)}>
+                    <Text style={styles.saveText}>🖨️ Print</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -1466,25 +2117,91 @@ const styles = StyleSheet.create({
   accountSelectBtnActive: { backgroundColor: '#eef2ff', borderColor: '#4361ee' },
   accountSelectText: { fontSize: 14, color: '#444' },
   accountSelectTextActive: { color: '#4361ee', fontWeight: '600' },
-  label: { fontSize: 13, color: '#444', marginBottom: 6, marginTop: 4 },
-  catBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#ddd', marginRight: 8 },
-  catBtnActive: { backgroundColor: '#4361ee', borderColor: '#4361ee' },
-  catBtnText: { fontSize: 13, color: '#444' },
-  catBtnTextActive: { color: '#fff' },
-  typeRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  typeBtn: { flex: 1, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', alignItems: 'center' },
-  typeBtnActive: { backgroundColor: '#4361ee', borderColor: '#4361ee' },
-  typeBtnText: { color: '#444', fontWeight: '500' },
-  typeBtnTextActive: { color: '#fff' },
+  // Item card styles
+  itemCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 10, elevation: 2 },
+  itemCardTop: { flexDirection: 'row', marginBottom: 12 },
+  itemCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' },
+  itemStyleNo: { fontSize: 17, fontWeight: '700', color: '#1e1b4b' },
+  itemPriceBadge: { backgroundColor: '#d1fae5', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
+  itemPriceBadgeText: { fontSize: 12, fontWeight: '600', color: '#065f46' },
+  itemNoPriceBadge: { backgroundColor: '#fef3c7', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
+  itemNoPriceBadgeText: { fontSize: 12, fontWeight: '600', color: '#92400e' },
+  itemDesc2: { fontSize: 13, color: '#666', marginBottom: 6 },
+  itemTagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
+  itemColorTag: { backgroundColor: '#eef2ff', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
+  itemColorTagText: { fontSize: 11, color: '#4361ee', fontWeight: '500' },
+  itemSizeTag: { backgroundColor: '#f3f4f6', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  itemSizeTagText: { fontSize: 11, color: '#374151', fontWeight: '500' },
+  itemCostingInfo: { alignItems: 'flex-end', gap: 2, paddingLeft: 12 },
+  itemCostingLabel: { fontSize: 10, color: '#888', textTransform: 'uppercase', letterSpacing: 0.5 },
+  itemCostingValue: { fontSize: 13, fontWeight: '600', color: '#1e1b4b' },
+  itemCardActions2: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  itemCostingBtn: { backgroundColor: '#eef2ff', borderRadius: 8, paddingVertical: 7, paddingHorizontal: 14, borderWidth: 1, borderColor: '#c7d2fe' },
+  itemCostingBtnText: { color: '#4361ee', fontWeight: '600', fontSize: 13 },
+  itemEditBtn: { backgroundColor: '#fef3c7', borderRadius: 8, paddingVertical: 7, paddingHorizontal: 14 },
+  itemEditBtnText: { color: '#92400e', fontWeight: '600', fontSize: 13 },
+  itemDelBtn: { backgroundColor: '#fee2e2', borderRadius: 8, paddingVertical: 7, paddingHorizontal: 14 },
+  itemDelBtnText: { color: '#ef4444', fontWeight: '600', fontSize: 13 },
+  // Add/edit item modal styles
+  addTagRow: { flexDirection: 'row', gap: 8, marginBottom: 10, alignItems: 'center' },
+  addTagBtn: { backgroundColor: '#4361ee', borderRadius: 8, paddingVertical: 11, paddingHorizontal: 14 },
+  addTagBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  predefinedSizes: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  preSize: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', backgroundColor: '#fff' },
+  preSizeActive: { backgroundColor: '#4361ee', borderColor: '#4361ee' },
+  preSizeText: { fontSize: 13, color: '#444', fontWeight: '500' },
+  preSizeTextActive: { color: '#fff' },
+  noteBox: { backgroundColor: '#fef3c7', borderRadius: 8, padding: 12, marginTop: 8 },
+  noteText: { fontSize: 13, color: '#92400e' },
+  // Costing sheet styles
+  costingTable: { backgroundColor: '#f8faff', borderRadius: 10, overflow: 'hidden', marginBottom: 12, borderWidth: 1, borderColor: '#e0e7ff' },
+  costingTableHeader: { flexDirection: 'row', backgroundColor: '#1e1b4b', paddingVertical: 10, paddingHorizontal: 12 },
+  costingTh: { color: '#fff', fontWeight: '600', fontSize: 12 },
+  costingRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#e5e7eb', gap: 8 },
+  costingLabelInput: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 6, padding: 8, fontSize: 13, backgroundColor: '#fff' },
+  costingAmountInput: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 6, padding: 8, fontSize: 13, backgroundColor: '#fff', textAlign: 'right' },
+  costingSummary: { backgroundColor: '#f8faff', borderRadius: 10, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#e0e7ff' },
+  costingSummaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  costingSummaryLabel: { fontSize: 14, color: '#444', fontWeight: '500' },
+  costingSummaryValue: { fontSize: 16, fontWeight: '700', color: '#1e1b4b' },
+  profitInputRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  pKRLabel: { fontSize: 13, color: '#666', fontWeight: '500' },
+  profitInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 8, fontSize: 14, width: 120, textAlign: 'right', backgroundColor: '#fff' },
+  marginPercent: { fontSize: 12, color: '#16a34a', fontWeight: '600', textAlign: 'right', marginTop: 6 },
+  sellingPriceBox: { backgroundColor: '#1e1b4b', borderRadius: 12, padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  sellingPriceLabel: { fontSize: 13, color: '#a5b4fc', fontWeight: '600', letterSpacing: 1 },
+  sellingPriceSub: { fontSize: 11, color: '#6366f1', marginTop: 3 },
+  sellingPriceValue: { fontSize: 24, fontWeight: 'bold', color: '#fff' },
+  // PO styles
+  poCard: { backgroundColor: '#fff', borderRadius: 10, padding: 14, marginBottom: 10, elevation: 2, flexDirection: 'row', alignItems: 'center' },
+  poNumber: { fontSize: 15, fontWeight: 'bold', color: '#1e1b4b' },
+  poArticle: { fontSize: 12, color: '#666', marginTop: 2 },
+  poDateText: { fontSize: 11, color: '#888', marginTop: 2 },
+  poRight: { alignItems: 'flex-end' },
+  poBadge: { borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 },
+  poCompleted: { backgroundColor: '#d1fae5' },
+  poInProgress: { backgroundColor: '#fef3c7' },
+  poPending: { backgroundColor: '#fee2e2' },
+  poBadgeText: { fontSize: 11, fontWeight: '600' },
+  poPieces: { fontSize: 13, color: '#4361ee', fontWeight: '600', marginTop: 4 },
+  // Invoice item styles
   styleBtn: { padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#4361ee', marginRight: 8, paddingHorizontal: 14, alignItems: 'center', backgroundColor: '#eef2ff', minWidth: 90 },
   styleBtnNo: { color: '#4361ee', fontWeight: '700', fontSize: 13 },
   styleBtnColor: { color: '#666', fontSize: 10, marginTop: 2 },
   styleBtnPrice: { color: '#888', fontSize: 11, marginTop: 2 },
   selectedItems: { backgroundColor: '#f9fafb', borderRadius: 8, padding: 12, marginBottom: 10 },
-  selectedItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  selectedItem: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
   selectedItemName: { fontSize: 14, fontWeight: '600', color: '#1e1b4b' },
-  selectedItemPrice: { fontSize: 12, color: '#666', marginTop: 2 },
-  qtyControls: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  selectedItemPrice: { fontSize: 12, color: '#666', marginTop: 4 },
+  invColorBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, borderWidth: 1, borderColor: '#ddd', marginRight: 6, backgroundColor: '#fff' },
+  invColorBtnActive: { backgroundColor: '#4361ee', borderColor: '#4361ee' },
+  invColorBtnText: { fontSize: 11, color: '#444' },
+  invColorBtnTextActive: { color: '#fff', fontWeight: '600' },
+  invSizeBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#ddd', backgroundColor: '#fff' },
+  invSizeBtnActive: { backgroundColor: '#4361ee', borderColor: '#4361ee' },
+  invSizeBtnText: { fontSize: 11, color: '#444' },
+  invSizeBtnTextActive: { color: '#fff', fontWeight: '600' },
+  qtyControls: { flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 8 },
   qtyBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#4361ee', alignItems: 'center', justifyContent: 'center' },
   qtyBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   qtyInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, fontSize: 14, fontWeight: '600', color: '#1e1b4b', textAlign: 'center', minWidth: 50 },
@@ -1495,10 +2212,21 @@ const styles = StyleSheet.create({
   infoBox: { backgroundColor: '#eef2ff', borderRadius: 8, padding: 12, marginBottom: 12 },
   infoLabel: { fontSize: 12, color: '#666', marginBottom: 4 },
   infoValue: { fontSize: 16, fontWeight: 'bold', color: '#1e1b4b' },
+  label: { fontSize: 13, color: '#444', marginBottom: 6, marginTop: 4 },
+  catBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#ddd', marginRight: 8 },
+  catBtnActive: { backgroundColor: '#4361ee', borderColor: '#4361ee' },
+  catBtnText: { fontSize: 13, color: '#444' },
+  catBtnTextActive: { color: '#fff' },
+  typeRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  typeBtn: { flex: 1, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', alignItems: 'center' },
+  typeBtnActive: { backgroundColor: '#4361ee', borderColor: '#4361ee' },
+  typeBtnText: { color: '#444', fontWeight: '500' },
+  typeBtnTextActive: { color: '#fff' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end', alignItems: 'center' },
   modal: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, maxHeight: '95%', width: '100%' },
-  modalDesktop: { borderRadius: 16, width: 580, marginBottom: 40 },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 16, color: '#1e1b4b' },
+  modalDesktop: { borderRadius: 16, width: 680, marginBottom: 40 },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 4, color: '#1e1b4b' },
+  modalSub: { fontSize: 13, color: '#666', marginBottom: 16 },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 11, fontSize: 14, marginBottom: 10 },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
   cancelBtn: { flex: 1, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', alignItems: 'center' },

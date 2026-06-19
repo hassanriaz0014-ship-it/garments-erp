@@ -3,11 +3,14 @@ const router = express.Router();
 const db = require('../db');
 const protect = require('../middleware/auth');
 
-// GET all items
+// GET all items with party name
 router.get('/', protect, async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT * FROM items ORDER BY created_at DESC'
+      `SELECT i.*, p.name as party_name
+       FROM items i
+       LEFT JOIN parties p ON i.party_id = p.id
+       ORDER BY i.created_at DESC`
     );
     res.json(result.rows);
   } catch (err) {
@@ -19,7 +22,11 @@ router.get('/', protect, async (req, res) => {
 router.get('/party/:party_id', protect, async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT * FROM items WHERE party_id = $1 ORDER BY created_at DESC',
+      `SELECT i.*, p.name as party_name
+       FROM items i
+       LEFT JOIN parties p ON i.party_id = p.id
+       WHERE i.party_id = $1
+       ORDER BY i.created_at DESC`,
       [req.params.party_id]
     );
     res.json(result.rows);
@@ -32,7 +39,11 @@ router.get('/party/:party_id', protect, async (req, res) => {
 router.get('/:id', protect, async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT * FROM items WHERE id = $1', [req.params.id]
+      `SELECT i.*, p.name as party_name
+       FROM items i
+       LEFT JOIN parties p ON i.party_id = p.id
+       WHERE i.id = $1`,
+      [req.params.id]
     );
     if (result.rows.length === 0)
       return res.status(404).json({ message: 'Item not found' });
@@ -42,28 +53,28 @@ router.get('/:id', protect, async (req, res) => {
   }
 });
 
-// GET item by style number
-router.get('/style/:style_no', protect, async (req, res) => {
-  try {
-    const result = await db.query(
-      'SELECT * FROM items WHERE style_no = $1', [req.params.style_no]
-    );
-    if (result.rows.length === 0)
-      return res.status(404).json({ message: 'Style not found' });
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// POST — add item for a specific party
+// POST — add item
 router.post('/', protect, async (req, res) => {
-  const { style_no, description, color, size, price, image_url, party_id } = req.body;
+  const {
+    style_no, description, party_id,
+    colors, sizes, costing_sheet,
+    profit_margin, selling_price, total_cost,
+    labour_price, image_url
+  } = req.body;
   try {
     const result = await db.query(
-      `INSERT INTO items (style_no, description, color, size, price, image_url, party_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [style_no, description, color, size, price, image_url, party_id]
+      `INSERT INTO items
+        (style_no, description, party_id, colors, sizes,
+         costing_sheet, profit_margin, selling_price, total_cost,
+         labour_price, image_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [
+        style_no, description, party_id,
+        colors || [], sizes || [],
+        JSON.stringify(costing_sheet || []),
+        profit_margin || 0, selling_price || 0, total_cost || 0,
+        labour_price || 0, image_url || ''
+      ]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -73,13 +84,28 @@ router.post('/', protect, async (req, res) => {
 
 // PUT — update item
 router.put('/:id', protect, async (req, res) => {
-  const { style_no, description, color, size, price, image_url } = req.body;
+  const {
+    style_no, description,
+    colors, sizes, costing_sheet,
+    profit_margin, selling_price, total_cost,
+    labour_price, image_url
+  } = req.body;
   try {
     const result = await db.query(
-      `UPDATE items SET style_no=$1, description=$2, color=$3, size=$4,
-       price=$5, image_url=$6, updated_at=NOW()
-       WHERE id=$7 RETURNING *`,
-      [style_no, description, color, size, price, image_url, req.params.id]
+      `UPDATE items SET
+        style_no=$1, description=$2, colors=$3, sizes=$4,
+        costing_sheet=$5, profit_margin=$6, selling_price=$7,
+        total_cost=$8, labour_price=$9, image_url=$10,
+        updated_at=NOW()
+       WHERE id=$11 RETURNING *`,
+      [
+        style_no, description,
+        colors || [], sizes || [],
+        JSON.stringify(costing_sheet || []),
+        profit_margin || 0, selling_price || 0, total_cost || 0,
+        labour_price || 0, image_url || '',
+        req.params.id
+      ]
     );
     if (result.rows.length === 0)
       return res.status(404).json({ message: 'Item not found' });

@@ -5,6 +5,7 @@ import {
   useWindowDimensions
 } from 'react-native';
 import client from '../api/client';
+
 import DatePicker from '../components/DatePicker';
 
 export default function EmployeesScreen() {
@@ -13,9 +14,12 @@ export default function EmployeesScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState('Fixed');
   const [form, setForm] = useState({
-    full_name: '', role: '', phone: '',
-    cnic: '', address: '', joining_date: '', salary: ''
+    full_name: '', role: '', phone: '', cnic: '',
+    address: '', joining_date: '', salary: '',
+    employee_type: 'Fixed',
+    rate_per_piece: '', rate_per_day: '', rate_per_order: ''
   });
   const { width } = useWindowDimensions();
   const isDesktop = width > 768;
@@ -35,7 +39,12 @@ export default function EmployeesScreen() {
 
   const openAddModal = () => {
     setEditingEmployee(null);
-    setForm({ full_name: '', role: '', phone: '', cnic: '', address: '', joining_date: '', salary: '' });
+    setForm({
+      full_name: '', role: '', phone: '', cnic: '',
+      address: '', joining_date: '', salary: '',
+      employee_type: activeTab,
+      rate_per_piece: '', rate_per_day: '', rate_per_order: ''
+    });
     setModalVisible(true);
   };
 
@@ -48,7 +57,11 @@ export default function EmployeesScreen() {
       cnic: emp.cnic || '',
       address: emp.address || '',
       joining_date: emp.joining_date ? emp.joining_date.toString().split('T')[0] : '',
-      salary: String(emp.salary || '')
+      salary: String(emp.salary || ''),
+      employee_type: emp.employee_type || 'Fixed',
+      rate_per_piece: String(emp.rate_per_piece || ''),
+      rate_per_day: String(emp.rate_per_day || ''),
+      rate_per_order: String(emp.rate_per_order || '')
     });
     setModalVisible(true);
   };
@@ -66,7 +79,6 @@ export default function EmployeesScreen() {
       }
       setModalVisible(false);
       setEditingEmployee(null);
-      setForm({ full_name: '', role: '', phone: '', cnic: '', address: '', joining_date: '', salary: '' });
       fetchEmployees();
     } catch (err) {
       Alert.alert('Error', 'Could not save employee');
@@ -84,20 +96,36 @@ export default function EmployeesScreen() {
     }
   };
 
-  const printEmployees = () => {
-    const rows = filteredEmployees.map(e =>
-      `<tr>
-        <td>${e.full_name}</td>
-        <td>${e.role || '-'}</td>
-        <td>${e.phone || '-'}</td>
-        <td>${e.cnic || '-'}</td>
-        <td>${e.joining_date ? e.joining_date.toString().split('T')[0] : '-'}</td>
-        <td>PKR ${parseInt(e.salary || 0).toLocaleString()}</td>
-        <td>${e.status}</td>
-      </tr>`
+  const printEmployees = (type) => {
+    const data = filteredByType(type);
+    const rows = data.map(e =>
+      type === 'Fixed'
+        ? `<tr>
+            <td>${e.full_name}</td>
+            <td>${e.role || '-'}</td>
+            <td>${e.phone || '-'}</td>
+            <td>${e.joining_date ? e.joining_date.toString().split('T')[0] : '-'}</td>
+            <td>PKR ${parseInt(e.salary || 0).toLocaleString()}</td>
+            <td>${e.status}</td>
+          </tr>`
+        : `<tr>
+            <td>${e.full_name}</td>
+            <td>${e.role || '-'}</td>
+            <td>${e.phone || '-'}</td>
+            <td>${e.joining_date ? e.joining_date.toString().split('T')[0] : '-'}</td>
+            <td>PKR ${parseInt(e.rate_per_piece || 0).toLocaleString()}</td>
+            <td>PKR ${parseInt(e.rate_per_day || 0).toLocaleString()}</td>
+            <td>PKR ${parseInt(e.rate_per_order || 0).toLocaleString()}</td>
+            <td>${e.status}</td>
+          </tr>`
     ).join('');
-    const win = window.open('', '_blank');
-    win.document.write(`<!DOCTYPE html><html><head><title>Employees</title>
+
+    const headers = type === 'Fixed'
+      ? '<th>Name</th><th>Role</th><th>Phone</th><th>Joining Date</th><th>Salary</th><th>Status</th>'
+      : '<th>Name</th><th>Role</th><th>Phone</th><th>Joining Date</th><th>Per Piece</th><th>Per Day</th><th>Per Order</th><th>Status</th>';
+
+    const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
+    win.document.write(`<!DOCTYPE html><html><head><title>${type} Employees</title>
       <style>
         *{box-sizing:border-box;margin:0;padding:0}
         body{font-family:Arial,sans-serif;padding:24px}
@@ -109,25 +137,29 @@ export default function EmployeesScreen() {
         tr:nth-child(even){background:#f9fafb}
       </style></head>
       <body>
-        <h2>✂️ Garments ERP — Employees</h2>
-        <p>Total: ${filteredEmployees.length}</p>
+        <h2><img src="data:image/png;base64,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" style="width:40px;height:40px;object-fit:contain;vertical-align:middle;margin-right:8px;background:#000;border-radius:4px;padding:2px;"/> RS APPARELS</h2> — ${type} Employees</h2>
+        <p>Total: ${data.length}</p>
         <table>
-          <thead><tr>
-            <th>Name</th><th>Role</th><th>Phone</th>
-            <th>CNIC</th><th>Joining Date</th><th>Salary</th><th>Status</th>
-          </tr></thead>
+          <thead><tr>${headers}</tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </body></html>`);
     win.document.close();
     win.print();
+    win.onafterprint = () => win.close();
+    setTimeout(() => window.focus(), 100);
   };
 
-  const filteredEmployees = employees.filter(e =>
-    e.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (e.role && e.role.toLowerCase().includes(searchQuery.toLowerCase())) ||
-    (e.phone && e.phone.includes(searchQuery))
-  );
+  const filteredByType = (type) => employees
+    .filter(e => (e.employee_type || 'Fixed') === type)
+    .filter(e =>
+      e.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (e.role && e.role.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (e.phone && e.phone.includes(searchQuery))
+    );
+
+  const fixedEmployees = filteredByType('Fixed');
+  const contractEmployees = filteredByType('Contract');
 
   if (loading) return (
     <View style={styles.center}>
@@ -135,13 +167,100 @@ export default function EmployeesScreen() {
     </View>
   );
 
+  const renderTable = (data, type) => (
+    <View style={styles.tableContainer}>
+      <View style={styles.tableHeader}>
+        <Text style={[styles.tableHeaderCell, { flex: 2 }]}>Name</Text>
+        <Text style={[styles.tableHeaderCell, { flex: 1.5 }]}>Role</Text>
+        {isDesktop && <Text style={[styles.tableHeaderCell, { flex: 1.5 }]}>Phone</Text>}
+        {isDesktop && <Text style={[styles.tableHeaderCell, { flex: 1.5 }]}>Joining</Text>}
+        {type === 'Fixed'
+          ? <Text style={[styles.tableHeaderCell, { flex: 1.2 }]}>Salary</Text>
+          : <>
+            {isDesktop && <Text style={[styles.tableHeaderCell, { flex: 1 }]}>Per Piece</Text>}
+            {isDesktop && <Text style={[styles.tableHeaderCell, { flex: 1 }]}>Per Day</Text>}
+            {isDesktop && <Text style={[styles.tableHeaderCell, { flex: 1 }]}>Per Order</Text>}
+          </>
+        }
+        <Text style={[styles.tableHeaderCell, { flex: 1 }]}>Status</Text>
+        <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}></Text>
+      </View>
+      <ScrollView>
+        {data.length === 0
+          ? <Text style={styles.empty}>No {type.toLowerCase()} employees found.</Text>
+          : data.map((emp, index) => (
+            <View key={emp.id}
+              style={[styles.tableRow, index % 2 === 0 && styles.tableRowEven]}>
+              <Text style={[styles.tableCell, { flex: 2 }]}>{emp.full_name}</Text>
+              <Text style={[styles.tableCell, { flex: 1.5 }]}>{emp.role || '-'}</Text>
+              {isDesktop && <Text style={[styles.tableCell, { flex: 1.5 }]}>{emp.phone || '-'}</Text>}
+              {isDesktop && <Text style={[styles.tableCell, { flex: 1.5 }]}>
+                {emp.joining_date ? emp.joining_date.toString().split('T')[0] : '-'}
+              </Text>}
+              {type === 'Fixed'
+                ? <Text style={[styles.tableCell, { flex: 1.2, color: '#4361ee', fontWeight: '600' }]}>
+                    PKR {parseInt(emp.salary || 0).toLocaleString()}
+                  </Text>
+                : <>
+                  {isDesktop && <Text style={[styles.tableCell, { flex: 1, color: '#16a34a', fontWeight: '600' }]}>
+                    PKR {parseInt(emp.rate_per_piece || 0).toLocaleString()}
+                  </Text>}
+                  {isDesktop && <Text style={[styles.tableCell, { flex: 1, color: '#16a34a', fontWeight: '600' }]}>
+                    PKR {parseInt(emp.rate_per_day || 0).toLocaleString()}
+                  </Text>}
+                  {isDesktop && <Text style={[styles.tableCell, { flex: 1, color: '#16a34a', fontWeight: '600' }]}>
+                    PKR {parseInt(emp.rate_per_order || 0).toLocaleString()}
+                  </Text>}
+                </>
+              }
+              <View style={{ flex: 1 }}>
+                <View style={[styles.badge,
+                  emp.status === 'Active' ? styles.badgeActive : styles.badgeInactive]}>
+                  <Text style={styles.badgeText}>{emp.status}</Text>
+                </View>
+              </View>
+              <View style={{ flex: 0.8, flexDirection: 'row', gap: 6 }}>
+                <TouchableOpacity onPress={() => openEditModal(emp)}>
+                  <Text style={styles.actionIcon}>✏️</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => deleteEmployee(emp.id)}>
+                  <Text style={styles.actionIcon}>🗑️</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))
+        }
+      </ScrollView>
+    </View>
+  );
+
   return (
     <View style={styles.container}>
+
+      {/* Type tabs */}
+      <View style={styles.typeTabs}>
+        {['Fixed', 'Contract'].map(t => (
+          <TouchableOpacity key={t}
+            style={[styles.typeTab, activeTab === t && styles.typeTabActive]}
+            onPress={() => setActiveTab(t)}>
+            <Text style={[styles.typeTabText, activeTab === t && styles.typeTabTextActive]}>
+              {t === 'Fixed' ? '👔 Fixed' : '📋 Contract'}
+            </Text>
+            <View style={[styles.typeTabBadge,
+              activeTab === t ? styles.typeTabBadgeActive : styles.typeTabBadgeInactive]}>
+              <Text style={styles.typeTabBadgeText}>
+                {t === 'Fixed' ? fixedEmployees.length : contractEmployees.length}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <View style={styles.actionRow}>
         <TouchableOpacity style={styles.addBtn} onPress={openAddModal}>
-          <Text style={styles.addBtnText}>+ Add Employee</Text>
+          <Text style={styles.addBtnText}>+ Add {activeTab} Employee</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.printBtn} onPress={printEmployees}>
+        <TouchableOpacity style={styles.printBtn} onPress={() => printEmployees(activeTab)}>
           <Text style={styles.printBtnText}>🖨️ Print</Text>
         </TouchableOpacity>
       </View>
@@ -153,56 +272,33 @@ export default function EmployeesScreen() {
         onChangeText={setSearchQuery}
       />
 
-      <View style={styles.tableContainer}>
-        <View style={styles.tableHeader}>
-          <Text style={[styles.tableHeaderCell, { flex: 2 }]}>Name</Text>
-          <Text style={[styles.tableHeaderCell, { flex: 1.5 }]}>Role</Text>
-          {isDesktop && <Text style={[styles.tableHeaderCell, { flex: 1.5 }]}>Phone</Text>}
-          {isDesktop && <Text style={[styles.tableHeaderCell, { flex: 1.5 }]}>Joining Date</Text>}
-          <Text style={[styles.tableHeaderCell, { flex: 1 }]}>Salary</Text>
-          <Text style={[styles.tableHeaderCell, { flex: 1 }]}>Status</Text>
-          <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}></Text>
-        </View>
-        <ScrollView>
-          {filteredEmployees.length === 0
-            ? <Text style={styles.empty}>No employees found.</Text>
-            : filteredEmployees.map((emp, index) => (
-              <View key={emp.id}
-                style={[styles.tableRow, index % 2 === 0 && styles.tableRowEven]}>
-                <Text style={[styles.tableCell, { flex: 2 }]}>{emp.full_name}</Text>
-                <Text style={[styles.tableCell, { flex: 1.5 }]}>{emp.role || '-'}</Text>
-                {isDesktop && <Text style={[styles.tableCell, { flex: 1.5 }]}>{emp.phone || '-'}</Text>}
-                {isDesktop && <Text style={[styles.tableCell, { flex: 1.5 }]}>
-                  {emp.joining_date ? emp.joining_date.toString().split('T')[0] : '-'}
-                </Text>}
-                <Text style={[styles.tableCell, { flex: 1 }]}>
-                  PKR {parseInt(emp.salary || 0).toLocaleString()}
-                </Text>
-                <View style={{ flex: 1 }}>
-                  <View style={[styles.badge,
-                    emp.status === 'Active' ? styles.badgeActive : styles.badgeInactive]}>
-                    <Text style={styles.badgeText}>{emp.status}</Text>
-                  </View>
-                </View>
-                <View style={{ flex: 0.8, flexDirection: 'row', gap: 6 }}>
-                  <TouchableOpacity onPress={() => openEditModal(emp)}>
-                    <Text style={styles.actionIcon}>✏️</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => deleteEmployee(emp.id)}>
-                    <Text style={styles.actionIcon}>🗑️</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))
-          }
-        </ScrollView>
-      </View>
+      {activeTab === 'Fixed' ? renderTable(fixedEmployees, 'Fixed') : renderTable(contractEmployees, 'Contract')}
 
       <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, isDesktop && styles.modalDesktop]}>
-            <Text style={styles.modalTitle}>{editingEmployee ? 'Edit Employee' : 'Add Employee'}</Text>
+            <Text style={styles.modalTitle}>
+              {editingEmployee ? 'Edit Employee' : `Add ${form.employee_type} Employee`}
+            </Text>
             <ScrollView>
+              {/* Employee type selector - only for new */}
+              {!editingEmployee && (
+                <>
+                  <Text style={styles.label}>Employee Type</Text>
+                  <View style={styles.segmentRow}>
+                    {['Fixed', 'Contract'].map(t => (
+                      <TouchableOpacity key={t}
+                        style={[styles.segmentBtn, form.employee_type === t && styles.segmentBtnActive]}
+                        onPress={() => setForm({ ...form, employee_type: t })}>
+                        <Text style={[styles.segmentBtnText, form.employee_type === t && styles.segmentBtnTextActive]}>
+                          {t === 'Fixed' ? '👔 Fixed' : '📋 Contract'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              )}
+
               <TextInput style={styles.input} placeholder="Full name *"
                 value={form.full_name} onChangeText={(v) => setForm({ ...form, full_name: v })} />
               <TextInput style={styles.input} placeholder="Role (e.g. Tailor, Cutter)"
@@ -213,14 +309,28 @@ export default function EmployeesScreen() {
                 value={form.cnic} onChangeText={(v) => setForm({ ...form, cnic: v })} />
               <TextInput style={styles.input} placeholder="Address"
                 value={form.address} onChangeText={(v) => setForm({ ...form, address: v })} />
-              <DatePicker
-                label="Joining Date"
+              <DatePicker label="Joining Date"
                 value={form.joining_date}
-                onChange={(v) => setForm({ ...form, joining_date: v })}
-              />
-              <TextInput style={styles.input} placeholder="Basic salary (PKR)"
-                value={form.salary} onChangeText={(v) => setForm({ ...form, salary: v })}
-                keyboardType="numeric" />
+                onChange={(v) => setForm({ ...form, joining_date: v })} />
+
+              {form.employee_type === 'Fixed' ? (
+                <TextInput style={styles.input} placeholder="Monthly salary (PKR)"
+                  value={form.salary} onChangeText={(v) => setForm({ ...form, salary: v })}
+                  keyboardType="numeric" />
+              ) : (
+                <View style={styles.ratesBox}>
+                  <Text style={styles.ratesTitle}>💰 Contract Rates</Text>
+                  <TextInput style={styles.input} placeholder="Rate per piece (PKR)"
+                    value={form.rate_per_piece} onChangeText={(v) => setForm({ ...form, rate_per_piece: v })}
+                    keyboardType="numeric" />
+                  <TextInput style={styles.input} placeholder="Rate per day (PKR)"
+                    value={form.rate_per_day} onChangeText={(v) => setForm({ ...form, rate_per_day: v })}
+                    keyboardType="numeric" />
+                  <TextInput style={styles.input} placeholder="Rate per order (PKR)"
+                    value={form.rate_per_order} onChangeText={(v) => setForm({ ...form, rate_per_order: v })}
+                    keyboardType="numeric" />
+                </View>
+              )}
             </ScrollView>
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => {
@@ -236,6 +346,7 @@ export default function EmployeesScreen() {
           </View>
         </View>
       </Modal>
+
     </View>
   );
 }
@@ -243,6 +354,15 @@ export default function EmployeesScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f0f4f8', padding: 16 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  typeTabs: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 10, padding: 4, marginBottom: 12, elevation: 2 },
+  typeTab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 10, borderRadius: 8 },
+  typeTabActive: { backgroundColor: '#4361ee' },
+  typeTabText: { fontSize: 14, fontWeight: '600', color: '#888' },
+  typeTabTextActive: { color: '#fff' },
+  typeTabBadge: { borderRadius: 20, paddingHorizontal: 8, paddingVertical: 2 },
+  typeTabBadgeActive: { backgroundColor: 'rgba(255,255,255,0.3)' },
+  typeTabBadgeInactive: { backgroundColor: '#f3f4f6' },
+  typeTabBadgeText: { fontSize: 11, fontWeight: 'bold', color: '#fff' },
   actionRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
   addBtn: { backgroundColor: '#4361ee', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16 },
   addBtnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
@@ -261,6 +381,14 @@ const styles = StyleSheet.create({
   badgeInactive: { backgroundColor: '#fee2e2' },
   badgeText: { fontSize: 11, fontWeight: '600' },
   actionIcon: { fontSize: 18 },
+  label: { fontSize: 13, color: '#444', marginBottom: 6, marginTop: 4 },
+  segmentRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  segmentBtn: { flex: 1, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', alignItems: 'center' },
+  segmentBtnActive: { backgroundColor: '#4361ee', borderColor: '#4361ee' },
+  segmentBtnText: { color: '#444', fontWeight: '600', fontSize: 14 },
+  segmentBtnTextActive: { color: '#fff' },
+  ratesBox: { backgroundColor: '#f8faff', borderRadius: 10, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#e0e7ff' },
+  ratesTitle: { fontSize: 14, fontWeight: '600', color: '#1e1b4b', marginBottom: 10 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end', alignItems: 'center' },
   modal: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, maxHeight: '90%', width: '100%' },
   modalDesktop: { borderRadius: 16, width: 480, marginBottom: 40 },

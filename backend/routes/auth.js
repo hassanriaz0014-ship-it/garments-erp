@@ -11,6 +11,8 @@ const jwt = require('jsonwebtoken');
 // Import database connection
 const db = require('../db');
 
+const protect = require('../middleware/auth');
+
 // LOGIN ROUTE — POST /api/auth/login
 // When user submits username and password, this runs
 router.post('/login', async (req, res) => {
@@ -53,6 +55,25 @@ router.post('/login', async (req, res) => {
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.put('/change-credentials', protect, async (req, res) => {
+  const { new_username, new_password, current_password } = req.body;
+  try {
+    const bcrypt = require('bcryptjs');
+    const userRes = await db.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
+    const user = userRes.rows[0];
+    const isMatch = await bcrypt.compare(current_password, user.password);
+    if (!isMatch) return res.status(400).json({ message: 'Current password is incorrect' });
+    if (new_username) await db.query('UPDATE users SET username = $1 WHERE id = $2', [new_username, req.user.id]);
+    if (new_password) {
+      const hashed = await bcrypt.hash(new_password, 10);
+      await db.query('UPDATE users SET password = $1 WHERE id = $2', [hashed, req.user.id]);
+    }
+    res.json({ message: 'Credentials updated successfully' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 

@@ -3,11 +3,17 @@ const router = express.Router();
 const db = require('../db');
 const protect = require('../middleware/auth');
 
-// GET all accessories
+// GET all accessories with supplier and party names
 router.get('/', protect, async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT * FROM accessories ORDER BY created_at DESC'
+      `SELECT a.*, 
+        s.name as supplier_name,
+        p.name as for_party_name
+       FROM accessories a
+       LEFT JOIN parties s ON a.supplier_id = s.id
+       LEFT JOIN parties p ON a.for_party_id = p.id
+       ORDER BY a.created_at DESC`
     );
     res.json(result.rows);
   } catch (err) {
@@ -15,12 +21,39 @@ router.get('/', protect, async (req, res) => {
   }
 });
 
-// GET accessories by party
+// GET accessories by party (owned by party)
 router.get('/party/:party_id', protect, async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT * FROM accessories WHERE party_id_owner = $1 ORDER BY created_at DESC',
+      `SELECT a.*,
+        s.name as supplier_name,
+        p.name as for_party_name
+       FROM accessories a
+       LEFT JOIN parties s ON a.supplier_id = s.id
+       LEFT JOIN parties p ON a.for_party_id = p.id
+       WHERE a.party_id_owner = $1 OR a.for_party_id = $1
+       ORDER BY a.created_at DESC`,
       [req.params.party_id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// GET accessories by supplier
+router.get('/supplier/:supplier_id', protect, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT a.*,
+        s.name as supplier_name,
+        p.name as for_party_name
+       FROM accessories a
+       LEFT JOIN parties s ON a.supplier_id = s.id
+       LEFT JOIN parties p ON a.for_party_id = p.id
+       WHERE a.supplier_id = $1
+       ORDER BY a.created_at DESC`,
+      [req.params.supplier_id]
     );
     res.json(result.rows);
   } catch (err) {
@@ -42,14 +75,23 @@ router.get('/:id', protect, async (req, res) => {
   }
 });
 
-// POST — add accessory for a specific party
+// POST — add accessory
 router.post('/', protect, async (req, res) => {
-  const { name, category, quantity, unit, unit_price, party_id_owner, notes } = req.body;
+  const {
+    name, category, quantity, unit, unit_price,
+    party_id_owner, notes, supplier_id,
+    for_party_id, accessory_type, purchase_date
+  } = req.body;
   try {
     const result = await db.query(
-      `INSERT INTO accessories (name, category, quantity, unit, unit_price, party_id_owner, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [name, category, quantity, unit, unit_price, party_id_owner, notes]
+      `INSERT INTO accessories 
+        (name, category, quantity, unit, unit_price, party_id_owner, notes,
+         supplier_id, for_party_id, accessory_type, purchase_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [name, category, quantity, unit, unit_price,
+       party_id_owner || for_party_id || null, notes,
+       supplier_id || null, for_party_id || null,
+       accessory_type || 'General', purchase_date || new Date()]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {

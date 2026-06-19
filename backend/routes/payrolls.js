@@ -3,11 +3,12 @@ const router = express.Router();
 const db = require('../db');
 const protect = require('../middleware/auth');
 
-// GET all payrolls — joins with employees table to show employee name
+// GET all payrolls
 router.get('/', protect, async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT p.*, e.full_name, e.role 
+      `SELECT p.*, e.full_name as employee_name, e.role,
+        e.employee_type, e.rate_per_piece, e.rate_per_day, e.rate_per_order
        FROM payrolls p
        JOIN employees e ON p.employee_id = e.id
        ORDER BY p.created_at DESC`
@@ -18,11 +19,12 @@ router.get('/', protect, async (req, res) => {
   }
 });
 
-// GET all payrolls for a specific employee
+// GET payrolls for specific employee
 router.get('/employee/:employee_id', protect, async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT p.*, e.full_name, e.role
+      `SELECT p.*, e.full_name as employee_name, e.role,
+        e.employee_type, e.rate_per_piece, e.rate_per_day, e.rate_per_order
        FROM payrolls p
        JOIN employees e ON p.employee_id = e.id
        WHERE p.employee_id = $1
@@ -35,11 +37,12 @@ router.get('/employee/:employee_id', protect, async (req, res) => {
   }
 });
 
-// GET single payroll by ID
+// GET single payroll
 router.get('/:id', protect, async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT p.*, e.full_name, e.role
+      `SELECT p.*, e.full_name as employee_name, e.role,
+        e.employee_type, e.rate_per_piece, e.rate_per_day, e.rate_per_order
        FROM payrolls p
        JOIN employees e ON p.employee_id = e.id
        WHERE p.id = $1`,
@@ -53,15 +56,35 @@ router.get('/:id', protect, async (req, res) => {
   }
 });
 
-// POST — add a new payroll entry for an employee
+// POST — add payroll
 router.post('/', protect, async (req, res) => {
-  const { employee_id, month, basic_salary, bonus, overtime, deductions, paid_on, status, notes } = req.body;
+  const {
+    employee_id, employee_name, month, year, basic_salary,
+    bonus, deductions, advance, notes, status,
+    payroll_type, week_start, week_end,
+    pieces_count, days_count, orders_count,
+    net_pay, total_pay, payroll_items
+  } = req.body;
   try {
     const result = await db.query(
-      `INSERT INTO payrolls 
-       (employee_id, month, basic_salary, bonus, overtime, deductions, paid_on, status, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [employee_id, month, basic_salary, bonus, overtime, deductions, paid_on, status, notes]
+      `INSERT INTO payrolls
+        (employee_id, employee_name, month, year, basic_salary,
+         bonus, deductions, advance, notes, status,
+         payroll_type, week_start, week_end,
+         pieces_count, days_count, orders_count,
+         net_pay, total_pay, payroll_items)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+       RETURNING *`,
+      [
+        employee_id, employee_name, month || null, year || null,
+        basic_salary || 0, bonus || 0, deductions || 0, advance || 0,
+        notes, status || 'Paid',
+        payroll_type || 'Monthly',
+        week_start || null, week_end || null,
+        pieces_count || 0, days_count || 0, orders_count || 0,
+        net_pay || total_pay || 0, net_pay || total_pay || 0,
+        JSON.stringify(payroll_items || [])
+      ]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -69,15 +92,36 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-// PUT — update a payroll entry
+// PUT — update payroll
 router.put('/:id', protect, async (req, res) => {
-  const { employee_id, month, basic_salary, bonus, overtime, deductions, paid_on, status, notes } = req.body;
+  const {
+    employee_id, employee_name, month, year, basic_salary,
+    bonus, deductions, advance, notes, status,
+    payroll_type, week_start, week_end,
+    pieces_count, days_count, orders_count,
+    net_pay, total_pay, payroll_items
+  } = req.body;
   try {
     const result = await db.query(
-      `UPDATE payrolls SET employee_id=$1, month=$2, basic_salary=$3, bonus=$4,
-       overtime=$5, deductions=$6, paid_on=$7, status=$8, notes=$9
-       WHERE id=$10 RETURNING *`,
-      [employee_id, month, basic_salary, bonus, overtime, deductions, paid_on, status, notes, req.params.id]
+      `UPDATE payrolls SET
+        employee_id=$1, employee_name=$2, month=$3, year=$4,
+        basic_salary=$5, bonus=$6, deductions=$7, advance=$8,
+        notes=$9, status=$10,
+        payroll_type=$11, week_start=$12, week_end=$13,
+        pieces_count=$14, days_count=$15, orders_count=$16,
+        net_pay=$17, total_pay=$18, payroll_items=$19
+       WHERE id=$20 RETURNING *`,
+      [
+        employee_id, employee_name, month || null, year || null,
+        basic_salary || 0, bonus || 0, deductions || 0, advance || 0,
+        notes, status || 'Paid',
+        payroll_type || 'Monthly',
+        week_start || null, week_end || null,
+        pieces_count || 0, days_count || 0, orders_count || 0,
+        net_pay || total_pay || 0, net_pay || total_pay || 0,
+        JSON.stringify(payroll_items || []),
+        req.params.id
+      ]
     );
     if (result.rows.length === 0)
       return res.status(404).json({ message: 'Payroll not found' });
@@ -87,7 +131,7 @@ router.put('/:id', protect, async (req, res) => {
   }
 });
 
-// DELETE — remove a payroll entry
+// DELETE
 router.delete('/:id', protect, async (req, res) => {
   try {
     await db.query('DELETE FROM payrolls WHERE id = $1', [req.params.id]);
