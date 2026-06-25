@@ -5,7 +5,6 @@ import {
   useWindowDimensions
 } from 'react-native';
 import client from '../api/client';
-
 import DatePicker from '../components/DatePicker';
 
 export default function AccessoriesScreen() {
@@ -25,7 +24,7 @@ export default function AccessoriesScreen() {
   const [form, setForm] = useState({
     name: '', category: 'Fabric',
     quantity: '', unit: '', unit_price: '', notes: '',
-    accessory_type: 'General', for_party_id: '', purchase_date: ''
+    accessory_type: 'General', for_party_id: '', purchase_date: '', supplier_id: ''
   });
   const { width } = useWindowDimensions();
   const isDesktop = width > 768;
@@ -79,7 +78,7 @@ export default function AccessoriesScreen() {
     setForm({
       name: '', category: 'Fabric', quantity: '', unit: '',
       unit_price: '', notes: '', accessory_type: 'General',
-      for_party_id: '', purchase_date: ''
+      for_party_id: '', purchase_date: '', supplier_id: ''
     });
     setModalVisible(true);
   };
@@ -95,7 +94,8 @@ export default function AccessoriesScreen() {
       notes: acc.notes || '',
       accessory_type: acc.accessory_type || 'General',
       for_party_id: String(acc.for_party_id || ''),
-      purchase_date: acc.purchase_date ? acc.purchase_date.toString().split('T')[0] : ''
+      purchase_date: acc.purchase_date ? acc.purchase_date.toString().split('T')[0] : '',
+      supplier_id: String(acc.supplier_id || '')
     });
     setModalVisible(true);
   };
@@ -104,10 +104,17 @@ export default function AccessoriesScreen() {
     if (!form.name) { Alert.alert('Error', 'Item name is required'); return; }
     try {
       if (editingAccessory) {
-        await client.put(`/accessories/${editingAccessory.id}`, form);
-      } else {
+        await client.put(`/accessories/${editingAccessory.id}`, {
+          ...form,
+          supplier_id: form.supplier_id || null,
+          for_party_id: form.accessory_type === 'For Party' ? form.for_party_id : null,
+          party_id_owner: form.accessory_type === 'For Party' ? form.for_party_id : null,
+        });
+      }
+       else {
         await client.post('/accessories', {
           ...form,
+          supplier_id: form.supplier_id || null,
           party_id_owner: form.accessory_type === 'For Party' ? form.for_party_id : null,
           for_party_id: form.accessory_type === 'For Party' ? form.for_party_id : null,
           accessory_type: form.accessory_type
@@ -157,6 +164,7 @@ export default function AccessoriesScreen() {
     ).join('');
     const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
     win.document.write(`<!DOCTYPE html><html><head><title>Accessories</title>
+      <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
       <style>
         *{box-sizing:border-box;margin:0;padding:0}
         body{font-family:Arial,sans-serif;padding:24px}
@@ -166,9 +174,10 @@ export default function AccessoriesScreen() {
         th{background:#1e1b4b;color:#fff;padding:10px 12px;text-align:left;font-size:12px}
         td{padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:12px}
         tr:nth-child(even){background:#f9fafb}
+        .header-logo, h2 img { width:36px !important; height:36px !important; object-fit:contain !important; background:#000 !important; border-radius:4px !important; padding:2px !important; vertical-align:middle !important; margin-right:8px !important; }
       </style></head>
       <body>
-        <h2><img src="data:image/png;base64,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" style="width:40px;height:40px;object-fit:contain;vertical-align:middle;margin-right:8px;background:#000;border-radius:4px;padding:2px;"/> RS APPARELS</h2> — Accessories & Materials</h2>
+        <h2><img src="https://res.cloudinary.com/dx1us5oiy/image/upload/Screenshot_2026-06-23_103649_hgb6dl.png" crossorigin="anonymous"/> RS APPARELS — Accessories & Materials</h2>
         <p>Total: ${filteredAccessories.length}</p>
         <table>
           <thead><tr>
@@ -177,11 +186,17 @@ export default function AccessoriesScreen() {
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+              setTimeout(function() { window.close(); }, 500);
+            }, 500);
+          };
+        </script>
       </body></html>`);
     win.document.close();
-    win.print();
-    win.onafterprint = () => win.close();
-    setTimeout(() => window.focus(), 100);
+    window.focus();
   };
 
   if (loading) return (
@@ -294,6 +309,24 @@ export default function AccessoriesScreen() {
                     style={[styles.catBtn, form.category === t && styles.catBtnActive]}
                     onPress={() => setForm({ ...form, category: t })}>
                     <Text style={[styles.catBtnText, form.category === t && styles.catBtnTextActive]}>{t}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <Text style={styles.label}>Supplier (optional)</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                <TouchableOpacity
+                  style={[styles.catBtn, form.supplier_id === '' && styles.catBtnActive]}
+                  onPress={() => setForm({ ...form, supplier_id: '' })}>
+                  <Text style={[styles.catBtnText, form.supplier_id === '' && styles.catBtnTextActive]}>None</Text>
+                </TouchableOpacity>
+                {suppliers.map(s => (
+                  <TouchableOpacity key={s.id}
+                    style={[styles.catBtn, String(form.supplier_id) === String(s.id) && styles.catBtnActive]}
+                    onPress={() => setForm({ ...form, supplier_id: String(s.id) })}>
+                    <Text style={[styles.catBtnText, String(form.supplier_id) === String(s.id) && styles.catBtnTextActive]}>
+                      {s.name}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>

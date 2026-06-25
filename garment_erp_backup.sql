@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict XM4o6q7ZWsB10Ndvy4Z3WnGPpgbIfUHHdcXgXqAwIT2kEZbrMAcNkPBc24ah3L3
+ XM4o6q7ZWsB10Ndvy4Z3WnGPpgbIfUHHdcXgXqAwIT2kEZbrMAcNkPBc24ah3L3
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -980,5 +980,5 @@ ALTER TABLE ONLY public.payrolls
 -- PostgreSQL database dump complete
 --
 
-\unrestrict XM4o6q7ZWsB10Ndvy4Z3WnGPpgbIfUHHdcXgXqAwIT2kEZbrMAcNkPBc24ah3L3
+ XM4o6q7ZWsB10Ndvy4Z3WnGPpgbIfUHHdcXgXqAwIT2kEZbrMAcNkPBc24ah3L3
 

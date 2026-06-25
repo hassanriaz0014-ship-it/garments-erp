@@ -22,6 +22,7 @@ const categoriesRoutes = require('./routes/categories');
 const partyAccountsRoutes = require('./routes/partyAccounts');
 const partyPaymentsRoutes = require('./routes/partyPayments');
 const purchaseOrdersRoutes = require('./routes/PurchaseOrders');
+const uploadRoutes = require('./routes/upload');
 
 // Create the express app
 const app = express();
@@ -44,6 +45,7 @@ app.use('/api/categories', categoriesRoutes);
 app.use('/api/party-accounts', partyAccountsRoutes);
 app.use('/api/party-payments', partyPaymentsRoutes);
 app.use('/api/purchase-orders', purchaseOrdersRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // Test route
 app.get('/', (req, res) => {

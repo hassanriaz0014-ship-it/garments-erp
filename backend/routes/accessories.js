@@ -101,13 +101,17 @@ router.post('/', protect, async (req, res) => {
 
 // PUT — update accessory
 router.put('/:id', protect, async (req, res) => {
-  const { name, category, quantity, unit, unit_price, notes } = req.body;
+  const { name, category, quantity, unit, unit_price, notes, supplier_id, for_party_id, accessory_type, purchase_date } = req.body;
   try {
+    const forParty = accessory_type === 'For Party' ? for_party_id || null : null;
     const result = await db.query(
       `UPDATE accessories SET name=$1, category=$2, quantity=$3, unit=$4,
-       unit_price=$5, notes=$6, updated_at=NOW()
-       WHERE id=$7 RETURNING *`,
-      [name, category, quantity, unit, unit_price, notes, req.params.id]
+       unit_price=$5, notes=$6, supplier_id=$7, for_party_id=$8,
+       party_id_owner=$9, accessory_type=$10, purchase_date=$11, updated_at=NOW()
+       WHERE id=$12 RETURNING *`,
+      [name, category, quantity, unit, unit_price, notes,
+       supplier_id || null, forParty, forParty,
+       accessory_type || 'General', purchase_date || null, req.params.id]
     );
     if (result.rows.length === 0)
       return res.status(404).json({ message: 'Accessory not found' });

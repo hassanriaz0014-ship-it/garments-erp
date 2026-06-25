@@ -59,21 +59,21 @@ router.post('/', protect, async (req, res) => {
     style_no, description, party_id,
     colors, sizes, costing_sheet,
     profit_margin, selling_price, total_cost,
-    labour_price, image_url
+    labour_price, image_url, fabric
   } = req.body;
   try {
     const result = await db.query(
       `INSERT INTO items
         (style_no, description, party_id, colors, sizes,
          costing_sheet, profit_margin, selling_price, total_cost,
-         labour_price, image_url)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+         labour_price, image_url, fabric)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [
         style_no, description, party_id,
         colors || [], sizes || [],
         JSON.stringify(costing_sheet || []),
         profit_margin || 0, selling_price || 0, total_cost || 0,
-        labour_price || 0, image_url || ''
+        labour_price || 0, image_url || '', fabric || ''
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -82,35 +82,37 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-// PUT — update item
 router.put('/:id', protect, async (req, res) => {
   const {
-    style_no, description,
+    style_no, description, party_id,
     colors, sizes, costing_sheet,
     profit_margin, selling_price, total_cost,
-    labour_price, image_url
+    labour_price, image_url, fabric
   } = req.body;
   try {
+    console.log('PUT items body:', req.body);  // ADD THIS
     const result = await db.query(
       `UPDATE items SET
-        style_no=$1, description=$2, colors=$3, sizes=$4,
-        costing_sheet=$5, profit_margin=$6, selling_price=$7,
-        total_cost=$8, labour_price=$9, image_url=$10,
-        updated_at=NOW()
-       WHERE id=$11 RETURNING *`,
+        style_no=$1, description=$2, party_id=$3, colors=$4, sizes=$5,
+        costing_sheet=$6, profit_margin=$7, selling_price=$8,
+        total_cost=$9, labour_price=$10, image_url=$11,
+        fabric=$12, updated_at=NOW()
+       WHERE id=$13 RETURNING *`,
       [
-        style_no, description,
+        style_no, description, party_id || null,
         colors || [], sizes || [],
         JSON.stringify(costing_sheet || []),
         profit_margin || 0, selling_price || 0, total_cost || 0,
-        labour_price || 0, image_url || '',
+        labour_price || 0, image_url || '', fabric || '',
         req.params.id
       ]
     );
+    console.log('PUT items result:', result.rows);  // ADD THIS
     if (result.rows.length === 0)
       return res.status(404).json({ message: 'Item not found' });
     res.json(result.rows[0]);
   } catch (err) {
+    console.log('PUT items error:', err.message);  // ADD THIS
     res.status(500).json({ message: err.message });
   }
 });

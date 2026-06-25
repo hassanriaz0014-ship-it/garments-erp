@@ -3,6 +3,19 @@ const router = express.Router();
 const db = require('../db');
 const protect = require('../middleware/auth');
 
+router.get('/global', protect, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT DISTINCT account_name, bank_name, account_no 
+       FROM party_accounts 
+       ORDER BY account_name`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // GET all accounts for a party
 router.get('/:party_id', protect, async (req, res) => {
   try {

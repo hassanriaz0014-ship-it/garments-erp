@@ -5,6 +5,7 @@ import {
   useWindowDimensions
 } from 'react-native';
 import client from '../api/client';
+
 import DatePicker from '../components/DatePicker';
 
 const SIZES = ['S', 'M', 'L', 'XL', 'XXL', 'General'];
@@ -203,7 +204,7 @@ export default function PurchaseOrdersScreen({ navigation }) {
       </tr>`;
     }).join('');
 
-    const win = window.open('', '_blank');
+    const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
     win.document.write(`<!DOCTYPE html><html><head><title>PO — ${po.po_number}</title>
       <style>
         *{box-sizing:border-box;margin:0;padding:0}
@@ -219,7 +220,7 @@ export default function PurchaseOrdersScreen({ navigation }) {
         .notes{margin-top:8px;font-size:12px;color:#666;font-style:italic}
       </style></head>
       <body>
-        <h2>✂️ Garments ERP — Purchase Order</h2>
+        <h2><img src="https://res.cloudinary.com/dx1us5oiy/image/upload/Screenshot_2026-06-23_103649_hgb6dl.png" style="..."/> RS APPARELS</h2> — Purchase Order</h2>
         <div class="info">
           <div class="info-row">PO Number: <span>${po.po_number}</span></div>
           <div class="info-row">PO Date: <span>${po.po_date ? po.po_date.toString().split('T')[0] : '-'}</span></div>
@@ -247,6 +248,8 @@ export default function PurchaseOrdersScreen({ navigation }) {
       </body></html>`);
     win.document.close();
     win.print();
+    win.onafterprint = () => win.close();
+    setTimeout(() => window.focus(), 100);
   };
 
   const statusColor = (status) => {

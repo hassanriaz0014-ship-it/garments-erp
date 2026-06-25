@@ -6,14 +6,21 @@ import {
 } from 'react-native';
 import client from '../api/client';
 
-
 const DEFAULT_COST_ITEMS = [
   { id: '1', label: 'Fabric', amount: '' },
   { id: '2', label: 'Thread & Accessories', amount: '' },
-  { id: '3', label: 'Buttons / Zippers', amount: '' },
+  { id: '3', label: 'Button/Zippers', amount: '' },
   { id: '4', label: 'Labour', amount: '' },
   { id: '5', label: 'Packaging', amount: '' },
-  { id: '6', label: 'Other', amount: '' },
+  { id: '6', label: 'Carton', amount: '' },
+  { id: '7', label: 'Sticker', amount: '' },
+  { id: '8', label: 'Tag Card Patti', amount: '' },
+  { id: '9', label: 'Woven Label', amount: '' },
+  { id: '10', label: 'Polly Bag', amount: '' },
+  { id: '11', label: 'Buttons', amount: '' },
+  { id: '12', label: 'Button Labour', amount: '' },
+  { id: '13', label: 'Cropping', amount: '' },
+  { id: '14', label: 'Tape/Clip', amount: '' },
 ];
 
 export default function ItemsScreen() {
@@ -25,11 +32,13 @@ export default function ItemsScreen() {
   const [editingItem, setEditingItem] = useState(null);
   const [costingItem, setCostingItem] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [imageUploading, setImageUploading] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null);
   const { width } = useWindowDimensions();
   const isDesktop = width > 768;
 
   const [form, setForm] = useState({
-    style_no: '', description: '', image_url: '', party_id: ''
+    style_no: '', description: '', image_url: '', party_id: '', fabric: ''
   });
   const [colors, setColors] = useState([]);
   const [sizes, setSizes] = useState([]);
@@ -64,7 +73,7 @@ export default function ItemsScreen() {
 
   const openAddModal = () => {
     setEditingItem(null);
-    setForm({ style_no: '', description: '', image_url: '', party_id: '' });
+    setForm({ style_no: '', description: '', image_url: '', party_id: '', fabric: '' });
     setColors([]); setSizes([]);
     setNewColor(''); setNewSize('');
     setModalVisible(true);
@@ -76,12 +85,31 @@ export default function ItemsScreen() {
       style_no: item.style_no || '',
       description: item.description || '',
       image_url: item.image_url || '',
-      party_id: String(item.party_id || '')
+      party_id: String(item.party_id || ''),
+      fabric: item.fabric || ''
     });
     setColors(item.colors || []);
     setSizes(item.sizes || []);
     setNewColor(''); setNewSize('');
     setModalVisible(true);
+  };
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImageUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      const res = await client.post('/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setForm(prev => ({ ...prev, image_url: res.data.url }));
+    } catch (err) {
+      alert('Image upload failed');
+    } finally {
+      setImageUploading(false);
+    }
   };
 
   const saveItem = async () => {
@@ -90,6 +118,7 @@ export default function ItemsScreen() {
       if (editingItem) {
         await client.put(`/items/${editingItem.id}`, {
           ...form, colors, sizes,
+          fabric: form.fabric || '',
           costing_sheet: editingItem.costing_sheet || [],
           profit_margin: editingItem.profit_margin || 0,
           selling_price: editingItem.selling_price || 0,
@@ -97,7 +126,7 @@ export default function ItemsScreen() {
           labour_price: editingItem.labour_price || 0
         });
       } else {
-        await client.post('/items', { ...form, colors, sizes });
+        await client.post('/items', { ...form, colors, sizes, fabric: form.fabric || '' });
       }
       setModalVisible(false);
       setEditingItem(null);
@@ -147,6 +176,7 @@ export default function ItemsScreen() {
         colors: costingItem.colors || [],
         sizes: costingItem.sizes || [],
         image_url: costingItem.image_url || '',
+        fabric: costingItem.fabric || '',
         labour_price: costingItem.labour_price || 0,
         costing_sheet: costingSheet,
         profit_margin: parseFloat(profitMargin || 0),
@@ -165,18 +195,29 @@ export default function ItemsScreen() {
     ).join('');
     const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
     win.document.write(`<!DOCTYPE html><html><head><title>Costing Sheet — ${costingItem.style_no}</title>
+      <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
       <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:32px;max-width:500px;margin:0 auto}.header{background:#1e1b4b;color:#fff;padding:20px;border-radius:8px;margin-bottom:20px;text-align:center}.header h2{font-size:20px;margin-bottom:4px}.header p{font-size:13px;color:#a5b4fc}table{width:100%;border-collapse:collapse;margin-bottom:16px}th{background:#f3f4f6;color:#374151;padding:10px 12px;text-align:left;font-size:13px;border-bottom:2px solid #e5e7eb}td{padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px}tr:nth-child(even){background:#f9fafb}.summary-row{display:flex;justify-content:space-between;padding:10px 12px;border-radius:6px;margin-bottom:8px}.selling-row{display:flex;justify-content:space-between;padding:16px;background:#1e1b4b;border-radius:8px;color:#fff;margin-top:8px}</style></head>
       <body>
-        <div class="header"><h2> ${costingItem.style_no}</h2><p>${costingItem.description || ''} · ${costingItem.party_name || ''}</p></div>
+        <div class="header">
+          <h2>${costingItem.style_no}</h2>
+          <p>${costingItem.description || ''} · ${costingItem.party_name || ''}</p>
+          ${costingItem.fabric ? `<p style="margin-top:4px">Fabric: ${costingItem.fabric}</p>` : ''}
+        </div>
         <table><thead><tr><th>Cost Item</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows}</tbody></table>
         <div class="summary-row" style="background:#f3f4f6"><span style="font-size:14px;font-weight:500;color:#374151">Total Cost</span><span style="font-size:16px;font-weight:bold;color:#1e1b4b">PKR ${totalCost.toLocaleString()}</span></div>
         <div class="summary-row" style="background:#f0fdf4"><span style="font-size:14px;color:#374151">Profit Margin</span><span style="font-size:15px;font-weight:600;color:#16a34a">+ PKR ${parseInt(profitMargin || 0).toLocaleString()}</span></div>
         <div class="selling-row"><div><div style="color:#a5b4fc;font-size:12px;letter-spacing:1px;margin-bottom:4px">SELLING PRICE</div><div style="color:#e0e7ff;font-size:12px">Total Cost + Profit Margin</div></div><div style="font-size:24px;font-weight:bold">PKR ${sellingPrice.toLocaleString()}</div></div>
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+              setTimeout(function() { window.close(); }, 500);
+            }, 500);
+          };
+        </script>
       </body></html>`);
     win.document.close();
-    win.print();
-    win.onafterprint = () => win.close();
-    setTimeout(() => window.focus(), 100); win.print();
+    window.focus();
   };
 
   if (loading) return (
@@ -201,6 +242,17 @@ export default function ItemsScreen() {
           : filteredItems.map((item) => (
             <View key={item.id} style={styles.itemCard}>
               <View style={styles.itemCardTop}>
+                {item.image_url ? (
+                  <img
+                    src={item.image_url}
+                    onClick={() => setPreviewImage(item.image_url)}
+                    style={{ width: 70, height: 70, objectFit: 'cover', borderRadius: 8, marginRight: 12, cursor: 'pointer' }}
+                  />
+                ) : (
+                  <View style={styles.imagePlaceholder}>
+                    <Text style={styles.imagePlaceholderText}>👔</Text>
+                  </View>
+                )}
                 <View style={{ flex: 1 }}>
                   <View style={styles.itemCardHeader}>
                     <Text style={styles.styleNo}>{item.style_no}</Text>
@@ -211,6 +263,7 @@ export default function ItemsScreen() {
                   </View>
                   <Text style={styles.itemDesc}>{item.description || '-'}</Text>
                   <Text style={styles.itemParty}>🏪 {item.party_name || '-'}</Text>
+                  {item.fabric ? <Text style={styles.itemFabric}>🧵 {item.fabric}</Text> : null}
                   {item.colors && item.colors.length > 0 && (
                     <View style={styles.tagsRow}>
                       {item.colors.map((c, i) => (
@@ -261,8 +314,35 @@ export default function ItemsScreen() {
                 value={form.style_no} onChangeText={(v) => setForm({ ...form, style_no: v })} />
               <TextInput style={styles.input} placeholder="Description (e.g. Mens Band Neck Jubba)"
                 value={form.description} onChangeText={(v) => setForm({ ...form, description: v })} />
-              <TextInput style={styles.input} placeholder="Image URL (optional)"
-                value={form.image_url} onChangeText={(v) => setForm({ ...form, image_url: v })} />
+              <TextInput style={styles.input} placeholder="Fabric (e.g. Wash N Wear, Khaddar)"
+                value={form.fabric} onChangeText={(v) => setForm({ ...form, fabric: v })} />
+
+              {/* IMAGE UPLOAD */}
+              <Text style={styles.label}>Item Image</Text>
+              {form.image_url ? (
+                <View style={{ marginBottom: 10 }}>
+                  <img src={form.image_url} style={{ width: '100%', maxHeight: 200, objectFit: 'contain', borderRadius: 8, border: '1px solid #ddd' }} />
+                  <TouchableOpacity style={styles.removeImgBtn} onPress={() => setForm({ ...form, image_url: '' })}>
+                    <Text style={styles.removeImgText}>✕ Remove Image</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.uploadBox}>
+                  {imageUploading
+                    ? <ActivityIndicator color="#4361ee" />
+                    : <>
+                        <Text style={styles.uploadIcon}>📷</Text>
+                        <Text style={styles.uploadText}>Click to upload image</Text>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageUpload}
+                          style={{ position: 'absolute', width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+                        />
+                      </>
+                  }
+                </View>
+              )}
 
               <Text style={styles.label}>Party *</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
@@ -417,6 +497,21 @@ export default function ItemsScreen() {
           </View>
         </View>
       </Modal>
+                      {/* IMAGE PREVIEW MODAL */}
+      <Modal visible={!!previewImage} animationType="fade" transparent>
+        <TouchableOpacity 
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center' }}
+          onPress={() => setPreviewImage(null)}>
+          {previewImage && (
+            <img
+              src={previewImage}
+              style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: 8 }}
+            />
+          )}
+          <Text style={{ color: '#fff', marginTop: 16, fontSize: 13 }}>Tap anywhere to close</Text>
+        </TouchableOpacity>
+      </Modal>
+      
     </View>
   );
 }
@@ -438,7 +533,10 @@ const styles = StyleSheet.create({
   noPriceBadge: { backgroundColor: '#fef3c7', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
   noPriceBadgeText: { fontSize: 12, fontWeight: '600', color: '#92400e' },
   itemDesc: { fontSize: 13, color: '#666', marginBottom: 2 },
-  itemParty: { fontSize: 12, color: '#4361ee', marginBottom: 6 },
+  itemParty: { fontSize: 12, color: '#4361ee', marginBottom: 2 },
+  itemFabric: { fontSize: 12, color: '#6b7280', marginBottom: 6 },
+  imagePlaceholder: { width: 70, height: 70, backgroundColor: '#f3f4f6', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  imagePlaceholderText: { fontSize: 28 },
   tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
   colorTag: { backgroundColor: '#eef2ff', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
   colorTagText: { fontSize: 11, color: '#4361ee', fontWeight: '500' },
@@ -469,6 +567,11 @@ const styles = StyleSheet.create({
   preSizeTextActive: { color: '#fff' },
   noteBox: { backgroundColor: '#fef3c7', borderRadius: 8, padding: 12, marginTop: 8 },
   noteText: { fontSize: 13, color: '#92400e' },
+  uploadBox: { borderWidth: 2, borderColor: '#c7d2fe', borderStyle: 'dashed', borderRadius: 8, padding: 24, alignItems: 'center', marginBottom: 10, position: 'relative', backgroundColor: '#f8faff' },
+  uploadIcon: { fontSize: 32, marginBottom: 8 },
+  uploadText: { fontSize: 13, color: '#6366f1' },
+  removeImgBtn: { backgroundColor: '#fee2e2', borderRadius: 6, padding: 8, alignItems: 'center', marginTop: 6 },
+  removeImgText: { color: '#ef4444', fontSize: 13, fontWeight: '500' },
   costingTable: { backgroundColor: '#f8faff', borderRadius: 10, overflow: 'hidden', marginBottom: 12, borderWidth: 1, borderColor: '#e0e7ff' },
   costingTableHeader: { flexDirection: 'row', backgroundColor: '#1e1b4b', paddingVertical: 10, paddingHorizontal: 12 },
   costingTh: { color: '#fff', fontWeight: '600', fontSize: 12 },

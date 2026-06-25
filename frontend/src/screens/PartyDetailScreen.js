@@ -13,10 +13,18 @@ const SIZES = ['S', 'M', 'L', 'XL', 'XXL', 'General'];
 const DEFAULT_COST_ITEMS = [
   { id: '1', label: 'Fabric', amount: '' },
   { id: '2', label: 'Thread & Accessories', amount: '' },
-  { id: '3', label: 'Buttons / Zippers', amount: '' },
+  { id: '3', label: 'Button/Zippers', amount: '' },
   { id: '4', label: 'Labour', amount: '' },
   { id: '5', label: 'Packaging', amount: '' },
-  { id: '6', label: 'Other', amount: '' },
+  { id: '6', label: 'Carton', amount: '' },
+  { id: '7', label: 'Sticker', amount: '' },
+  { id: '8', label: 'Tag Card Patti', amount: '' },
+  { id: '9', label: 'Woven Label', amount: '' },
+  { id: '10', label: 'Polly Bag', amount: '' },
+  { id: '11', label: 'Buttons', amount: '' },
+  { id: '12', label: 'Button Labour', amount: '' },
+  { id: '13', label: 'Cropping', amount: '' },
+  { id: '14', label: 'Tape/Clip', amount: '' },
 ];
 
 export default function PartyDetailScreen({ route }) {
@@ -36,6 +44,8 @@ export default function PartyDetailScreen({ route }) {
   const [payments, setPayments] = useState([]);
   const [ledgerEntries, setLedgerEntries] = useState([]);
   const [purchaseOrders, setPurchaseOrders] = useState([]);
+  const [globalAccounts, setGlobalAccounts] = useState([]);
+  const [selectedGlobalAccounts, setSelectedGlobalAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
@@ -48,6 +58,8 @@ export default function PartyDetailScreen({ route }) {
   const [viewPO, setViewPO] = useState(null);
   const [editingPO, setEditingPO] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
+  const [imageUploading, setImageUploading] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null);
   const [editingInvoice, setEditingInvoice] = useState(null);
   const [editPaymentVisible, setEditPaymentVisible] = useState(false);
   const [paymentForm, setPaymentForm] = useState({ amount_paid: '', status: 'Pending' });
@@ -68,7 +80,7 @@ export default function PartyDetailScreen({ route }) {
     name: '', category: 'Fabric', quantity: '', unit: '', unit_price: '', notes: ''
   });
   const [itemForm, setItemForm] = useState({
-    style_no: '', description: '', colors: [], sizes: [], image_url: ''
+    style_no: '', description: '', image_url: '', fabric: ''
   });
   const [itemColors, setItemColors] = useState([]);
   const [itemSizes, setItemSizes] = useState([]);
@@ -161,7 +173,7 @@ export default function PartyDetailScreen({ route }) {
       fetchCategories();
     } catch (err) { alert('Category already exists'); }
   };
-
+  
   const fetchAll = async () => {
     setLoading(true);
     try {
@@ -193,12 +205,14 @@ export default function PartyDetailScreen({ route }) {
         setInvoices(invRes.data.filter(i => String(i.party_id) === String(party.id)));
         setPayments(payRes.data);
       } else if (activeTab === 'Accounts') {
-        const [accRes, payRes] = await Promise.all([
+        const [accRes, payRes, globalRes] = await Promise.all([
           client.get(`/party-accounts/${party.id}`),
-          client.get(`/party-payments/${party.id}`)
+          client.get(`/party-payments/${party.id}`),
+          client.get('/party-accounts/global')
         ]);
         setAccounts(accRes.data);
         setPayments(payRes.data);
+        setGlobalAccounts(globalRes.data);
       } else if (activeTab === 'PO') {
         const res = await client.get(`/purchase-orders/party/${party.id}`);
         setPurchaseOrders(res.data);
@@ -427,7 +441,7 @@ export default function PartyDetailScreen({ route }) {
       win.document.write(`<!DOCTYPE html><html><head><title>PO — ${full.po_number}</title>
         <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:24px;font-size:12px}.info{margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:4px 40px}.info-row{font-size:13px}.info-row span{font-weight:bold}h2{color:#1e1b4b;margin-bottom:12px;font-size:16px}table{width:100%;border-collapse:collapse;margin-top:8px}th{background:#1e1b4b;color:#fff;padding:6px 8px;font-size:11px;border:1px solid #1e1b4b}td{padding:6px 8px;font-size:11px;border:1px solid #ddd}tr:nth-child(even){background:#f9fafb}.total-row{margin-top:12px;text-align:right;font-size:14px;font-weight:bold;color:#1e1b4b}</style></head>
         <body>
-          <h2><img src="data:image/png;base64,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" style="width:40px;height:40px;object-fit:contain;vertical-align:middle;margin-right:8px;background:#000;border-radius:4px;padding:2px;"/> RS APPARELS</h2> — Purchase Order</h2>
+          <img src="https://res.cloudinary.com/dx1us5oiy/image/upload/Screenshot_2026-06-23_103649_hgb6dl.png" style="..."/> RS APPARELS</h2> — Purchase Order</h2>
           <div class="info">
             <div class="info-row">PO Number: <span>${full.po_number}</span></div>
             <div class="info-row">PO Date: <span>${full.po_date ? full.po_date.toString().split('T')[0] : '-'}</span></div>
@@ -483,7 +497,7 @@ export default function PartyDetailScreen({ route }) {
     const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
     win.document.write(`<!DOCTYPE html><html><head><title>Accessories</title>
       <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:32px;max-width:900px;margin:0 auto}h2{color:#1e1b4b;margin-bottom:8px}p{color:#666;font-size:13px;margin-bottom:16px}table{width:100%;border-collapse:collapse}th{background:#1e1b4b;color:#fff;padding:10px 12px;text-align:left;font-size:13px}td{padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px}tr:nth-child(even){background:#f9fafb}.sub{text-align:right;margin-top:16px;padding-top:12px;border-top:2px solid #1e1b4b}.sub-value{font-size:20px;font-weight:bold;color:#1e1b4b}</style></head>
-      <body><h2><img src="data:image/png;base64,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" style="width:40px;height:40px;object-fit:contain;vertical-align:middle;margin-right:8px;background:#000;border-radius:4px;padding:2px;"/> RS APPARELS</h2> — Accessories</h2>
+      <body><h2><img src="https://res.cloudinary.com/dx1us5oiy/image/upload/Screenshot_2026-06-23_103649_hgb6dl.png" style="..."/> RS APPARELS</h2> — Accessories</h2>
       <p>Party: <strong>${party.name}</strong> · Filter: ${activeFilter} · Total: ${data.length}</p>
       <table><thead><tr><th>Name</th><th>Category</th><th>Quantity</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total Price</th></tr></thead>
       <tbody>${rows}</tbody></table>
@@ -506,7 +520,7 @@ export default function PartyDetailScreen({ route }) {
     const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
     win.document.write(`<!DOCTYPE html><html><head><title>Items</title>
       <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:32px;max-width:900px;margin:0 auto}h2{color:#1e1b4b;margin-bottom:8px}p{color:#666;font-size:13px;margin-bottom:16px}table{width:100%;border-collapse:collapse}th{background:#1e1b4b;color:#fff;padding:10px 12px;text-align:left;font-size:13px}td{padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px}tr:nth-child(even){background:#f9fafb}</style></head>
-      <body><h2><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIgAAACACAYAAADQ6SE/AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAAEnQAABJ0Ad5mH3gAABQdSURBVHhe7Z15XFNnusd/OclJQhI2kbDJvlUFccW6MNBqtYiOt9a2Sj8zd+rUVjv2TmtrdaaL1Xtt7XSzrUuXuWM7bbWtrZ32ClZLb7UuWIq4oVKCG4sBQRFIQsg6fwCBvCc5BEwOBM6Xz/MBnpMTyDm/857nfd7nfY8AgBU8PE6gSAcPT3d4gfCwwguEhxVeIDys8ALhYYUXCA8rvEB4WOEFwsMKLxAeVniB8LDCC4SHFV4gPKzwAuFhhRcIDyu8QHhY4QXCwwovEB5WeIHwsMILhIcVXiA8rPAC4WGFFwgPK7xAeFjhBcLDisBTE6fCgqQID5KQ7lvmeHkT6eLxIG4TSM7tSsydooTCR4jEEXJys8dQVWuhaTWjpdWEkvImlFfrUOImEWWMC0VihAIhgWKE+NOwWM2wms2wWCyAteuwXVC3Qqc3Q2+y4IK6FRQlwK+VWjRrjXbv5424TSAAkBghQ/bk4chIDUToMPe3Hr3hZEUL8ovqsffnBnITK0nRw/DA7ERkjA2BjLbCajLCYjbCYjLBYjG1fzeb7QQCABQFSH1EkPrQkEhpSGUS+MglMEIEVbUOq18vwsmy63b7eANuFUh37p4UhD/MCkNIoJjcxClavRmbv6nGd7+wn5zkmCA89Z+TMTYpCBazARazCRaT4ZYF4iP3gUzhgznL9uFA0VW7fbwBjwkEABRSIV5/JB5xYVJykx0f/1BHulwiLU6BkEAaIQE9i3B/SSNe3VVFugEAj94/EY/cPwFWsxEWk9GhQE6UNUBV3YwWrRFWqwWwAmPiFAgNlEAZIOYF0lfkUiE+WpkIudR5hyn7hXOkq9dMGemLqSN9MXNsALkJAFBY1oL1O+wF4isX4/11v0VSTBAAMARysLgS+YcrcegUu4AVUiFmTQzC4hnhiIlQDCqBCAG8SDrdidFkRYBciORwKaxWq0PbcbB3cYIjqhsMKDzfgoITN5EaLUOATGh7f43ejNXbK2E0dV0LpDgAAFYLrBYL1PXNWP32UXyyV4XKOm3XdicYTFacr9Ri18FaaFpNyEgbDhEtAi0WgRbToMU0Pt1zAZdrWshdBzzOL2s3cvR8M4xGk1NzJ3U3jVj94RWoarS29399dw20erPd615ccYe9ODo4eLwKv3tuH0rK6slNLrGz4Cruf+4XtOjc+7n6C04EYrVaYTabnZq70eotePbjGlxQt6KwrAU/l9u3ArlzU5E1KcbOBwAHiyux6o0DaNHdWve0rFKD1ZvPkG6vhBOBnK3Uky6Po22z4JXdddicx2wJcnNSSRfU9S14cetPpLvPFBTVYVeB46DYm+BEIP3FtSYTtG0WO9+8O5IRFuxr5wOAtZsPoEVrIN23xBuflJEur2NQC8QR8+5IJl1Q17fg+Fn39zCq63T47LtLpNurGFICCQ9WYMKoMNKNHXmeixfe3VVOuryKISWQrPRo0gUAOFB0mXS5jVJVIw4dryXdXsOQEoij2AMArl7zbH5iw3snSJfXMKQEkuwg73H8nJp0uZ2fimtx8vytJwP7gyElkPGjQkkXZ9xscW8PiSuGjEB8ZT0P6PEwGTICSYoZRrqAjp4Nj3M4E4iA5as/CQv2ha+cb12cwZ1ABAKnxgVhLC1FVnos6eLpgDOBUEKhU+MCtltJVjpz4I6nHc4EIhRRTq2/yZoUw99mnMDZ2TlbpWe0HFy2IBN66OImxQwnXTxcCoSihBAKHdtAIFzpOMs61OFMIAKB80CVC8KC2efqeDrd7q1wJpD+bEF8ZWKEDXcepAKARttm+zk8iL0KfyjBnUCEFCiR0KF5mswJI0iXHer6Fvx6uWveTPbk4fhozRiMS/Sze91QhDuBUBSj5eCqBRk/Ukm67CCH++NCpYhRirFpeRI2LEmAwsfz/+NAhTuBCCmn5mkyJ0SSLjvIgqHoYBEMbQYY2gxIT5Thk2duw7RRQ7M18fzZsSGAQEA5NE/ywKxEKGQ06bax50A5I0ANklMwGU02kwireG7RCDy1INzudUMBz56dbgiFFIQioUPzFAoZjYfvGU26bWh0Bry2/YidLzVaxpi302mZoxV465Fo1lmCgw3OPqnAwa3Fk7cYhYzG1mcyoPBx3nrs2HOGUckeHSyC0WB0aiMCKby7LBKjo4ZGT8czZ8cBXAapChmNLU9PRUKkP7nJRvnl63jvi2LSDaW/c0F1IpNQWL84DHMnDv64hFOBkCl2T6TaM9KU+HJDFhIinZ88jc6Ap/62j3QDAGJCXB+TeWhGEB7PCYZcwtlh5BzOPhmZPXVnJlXhI8Ld6SF465HovlmCgw3OPqnAwa3Fk7cYhYzG1mcyoPBx3nrs2HOGUckeHSyC0WB0aiMCKby7LBKjo4ZGT8czZ8cBXAapChmNLU9PRUKkP7nJRvnl63jvi2LSDaW/c0F1IpNQWL84DHMnDv64" style="width:40px;height:40px;object-fit:contain;vertical-align:middle;margin-right:8px;background:#000;border-radius:4px;padding:2px;"/> RS APPARELS</h2> — Items / Styles</h2>
+      <body><img src="https://res.cloudinary.com/dx1us5oiy/image/upload/Screenshot_2026-06-23_103649_hgb6dl.png" style="..."/> RS APPARELS</h2> — Items / Styles</h2>
       <p>Party: <strong>${party.name}</strong> · Total: ${data.length}</p>
       <table><thead><tr><th>Style No</th><th>Description</th><th>Colors</th><th>Sizes</th><th style="text-align:right">Selling Price</th></tr></thead>
       <tbody>${rows}</tbody></table></body></html>`);
@@ -535,7 +549,7 @@ export default function PartyDetailScreen({ route }) {
     const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
     win.document.write(`<!DOCTYPE html><html><head><title>Invoices</title>
       <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:32px;max-width:1100px;margin:0 auto}h2{color:#1e1b4b;margin-bottom:8px}p{color:#666;font-size:13px;margin-bottom:16px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#1e1b4b;color:#fff;padding:8px 10px;text-align:left}td{padding:8px 10px;border-bottom:1px solid #e5e7eb}tr:nth-child(even){background:#f9fafb}.summary{margin-top:16px;padding-top:12px;border-top:2px solid #1e1b4b;display:flex;justify-content:flex-end;gap:40px}.summary-item{text-align:right}.summary-label{font-size:12px;color:#666}.summary-value{font-size:16px;font-weight:bold}</style></head>
-      <body><h2><img src="data:image/png;base64,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" style="width:40px;height:40px;object-fit:contain;vertical-align:middle;margin-right:8px;background:#000;border-radius:4px;padding:2px;"/> RS APPARELS</h2> — Invoices</h2>
+      <body><h2><img src="https://res.cloudinary.com/dx1us5oiy/image/upload/Screenshot_2026-06-23_103649_hgb6dl.png" style="..."/> RS APPARELS</h2> — Invoices</h2>
       <p>Party: <strong>${party.name}</strong> · Total: ${data.length}</p>
       <table><thead><tr><th>Invoice #</th><th>Date</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Freight</th><th style="text-align:right">Advance</th><th style="text-align:right">Total</th><th style="text-align:right">Paid</th><th style="text-align:right">Remaining</th><th>Status</th></tr></thead>
       <tbody>${rows}</tbody></table>
@@ -615,7 +629,7 @@ export default function PartyDetailScreen({ route }) {
 
   const openAddItem = () => {
     setEditingItem(null);
-    setItemForm({ style_no: '', description: '', image_url: '' });
+    setItemForm({ style_no: '', description: '', image_url: '', fabric: '' });
     setItemColors([]); setItemSizes([]);
     setNewItemColor(''); setNewItemSize('');
     setModalVisible(true);
@@ -626,7 +640,8 @@ export default function PartyDetailScreen({ route }) {
     setItemForm({
       style_no: item.style_no || '',
       description: item.description || '',
-      image_url: item.image_url || ''
+      image_url: item.image_url || '',
+      fabric: item.fabric || ''
     });
     setItemColors(item.colors || []);
     setItemSizes(item.sizes || []);
@@ -640,6 +655,8 @@ export default function PartyDetailScreen({ route }) {
       if (editingItem) {
         await client.put(`/items/${editingItem.id}`, {
           ...itemForm, colors: itemColors, sizes: itemSizes,
+          fabric: itemForm.fabric || '',
+          party_id: editingItem.party_id || party.id,
           costing_sheet: editingItem.costing_sheet || [],
           profit_margin: editingItem.profit_margin || 0,
           selling_price: editingItem.selling_price || 0,
@@ -649,6 +666,7 @@ export default function PartyDetailScreen({ route }) {
       } else {
         await client.post('/items', {
           ...itemForm, colors: itemColors, sizes: itemSizes,
+          fabric: itemForm.fabric || '',
           party_id: party.id
         });
       }
@@ -662,6 +680,24 @@ export default function PartyDetailScreen({ route }) {
     if (window.confirm('Delete this item?')) {
       try { await client.delete(`/items/${id}`); fetchAll(); }
       catch (err) { alert('Could not delete'); }
+    }
+  };
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImageUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      const res = await client.post('/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setItemForm(prev => ({ ...prev, image_url: res.data.url }));
+    } catch (err) {
+      alert('Image upload failed');
+    } finally {
+      setImageUploading(false);
     }
   };
 
@@ -763,6 +799,7 @@ export default function PartyDetailScreen({ route }) {
       await client.post('/party-accounts', { ...accountForm, party_id: party.id });
       setAccountModalVisible(false);
       setAccountForm({ account_name: '', bank_name: '', account_no: '' });
+      setSelectedGlobalAccounts([]);
       fetchAll();
     } catch (err) { alert('Could not add account'); }
   };
@@ -977,6 +1014,17 @@ export default function PartyDetailScreen({ route }) {
                 : filteredItems.map((item) => (
                   <View key={item.id} style={styles.itemCard}>
                     <View style={styles.itemCardTop}>
+                      {item.image_url ? (
+                        <img
+                          src={item.image_url}
+                          onClick={() => setPreviewImage(item.image_url)}
+                          style={{ width: 70, height: 70, objectFit: 'cover', borderRadius: 8, marginRight: 12, cursor: 'pointer' }}
+                        />
+                      ) : (
+                        <View style={styles.imagePlaceholder}>
+                          <Text style={styles.imagePlaceholderText}>👔</Text>
+                        </View>
+                      )}
                       <View style={{ flex: 1 }}>
                         <View style={styles.itemCardHeader}>
                           <Text style={styles.itemStyleNo}>{item.style_no}</Text>
@@ -986,6 +1034,7 @@ export default function PartyDetailScreen({ route }) {
                           }
                         </View>
                         <Text style={styles.itemDesc2}>{item.description || '-'}</Text>
+                        {item.fabric ? <Text style={styles.itemFabric}>🧵 {item.fabric}</Text> : null}
                         {item.colors && item.colors.length > 0 && (
                           <View style={styles.itemTagsRow}>
                             {item.colors.map((c, i) => (
@@ -1299,8 +1348,34 @@ export default function PartyDetailScreen({ route }) {
                   value={itemForm.style_no} onChangeText={(v) => setItemForm({ ...itemForm, style_no: v })} />
                 <TextInput style={styles.input} placeholder="Description"
                   value={itemForm.description} onChangeText={(v) => setItemForm({ ...itemForm, description: v })} />
-                <TextInput style={styles.input} placeholder="Image URL (optional)"
-                  value={itemForm.image_url} onChangeText={(v) => setItemForm({ ...itemForm, image_url: v })} />
+                <TextInput style={styles.input} placeholder="Fabric (e.g. Wash N Wear, Khaddar)"
+                  value={itemForm.fabric} onChangeText={(v) => setItemForm({ ...itemForm, fabric: v })} />
+
+                <Text style={styles.label}>Item Image</Text>
+                {itemForm.image_url ? (
+                  <View style={{ marginBottom: 10 }}>
+                    <img src={itemForm.image_url} style={{ width: '100%', maxHeight: 200, objectFit: 'contain', borderRadius: 8, border: '1px solid #ddd' }} />
+                    <TouchableOpacity style={styles.removeImgBtn} onPress={() => setItemForm({ ...itemForm, image_url: '' })}>
+                      <Text style={styles.removeImgText}>✕ Remove Image</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={styles.uploadBox}>
+                    {imageUploading
+                      ? <ActivityIndicator color="#4361ee" />
+                      : <>
+                          <Text style={styles.uploadIcon}>📷</Text>
+                          <Text style={styles.uploadText}>Click to upload image</Text>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageUpload}
+                            style={{ position: 'absolute', width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+                          />
+                        </>
+                    }
+                  </View>
+                )}
 
                 <Text style={styles.label}>Colors</Text>
                 <View style={styles.itemTagsRow}>
@@ -1539,6 +1614,60 @@ export default function PartyDetailScreen({ route }) {
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, isDesktop && { width: 400, borderRadius: 16, marginBottom: 40 }]}>
             <Text style={styles.modalTitle}>Add Bank Account</Text>
+            {globalAccounts.length > 0 && (
+              <>
+                <Text style={styles.label}>Quick Add from Existing Accounts</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                  {globalAccounts.map((acc, i) => {
+                    const isSelected = selectedGlobalAccounts.some(
+                      a => a.account_no === acc.account_no
+                    );
+                    return (
+                      <TouchableOpacity key={i}
+                        style={[styles.catBtn, isSelected && styles.catBtnActive]}
+                        onPress={() => {
+                          if (isSelected) {
+                            setSelectedGlobalAccounts(selectedGlobalAccounts.filter(
+                              a => a.account_no !== acc.account_no
+                            ));
+                          } else {
+                            setSelectedGlobalAccounts([...selectedGlobalAccounts, acc]);
+                          }
+                        }}>
+                        <Text style={[styles.catBtnText, isSelected && styles.catBtnTextActive]}>
+                          {isSelected ? '✓ ' : ''}{acc.account_name}
+                        </Text>
+                        <Text style={{ fontSize: 10, color: isSelected ? '#fff' : '#888' }}>
+                          {acc.bank_name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                {selectedGlobalAccounts.length > 0 && (
+                  <TouchableOpacity
+                    style={[styles.saveBtn, { marginBottom: 10 }]}
+                    onPress={async () => {
+                      try {
+                        await Promise.all(selectedGlobalAccounts.map(acc =>
+                          client.post('/party-accounts', {
+                            party_id: party.id,
+                            account_name: acc.account_name,
+                            bank_name: acc.bank_name,
+                            account_no: acc.account_no
+                          })
+                        ));
+                        setSelectedGlobalAccounts([]);
+                        setAccountModalVisible(false);
+                        fetchAll();
+                      } catch (err) { alert('Could not add accounts'); }
+                    }}>
+                    <Text style={styles.saveText}>+ Add {selectedGlobalAccounts.length} Selected Account{selectedGlobalAccounts.length > 1 ? 's' : ''}</Text>
+                  </TouchableOpacity>
+                )}
+                <Text style={[styles.label, { marginTop: 4 }]}>Or Add New Account</Text>
+              </>
+            )}
             <TextInput style={styles.input} placeholder="Account name *"
               value={accountForm.account_name}
               onChangeText={(v) => setAccountForm({ ...accountForm, account_name: v })} />
@@ -2035,6 +2164,18 @@ export default function PartyDetailScreen({ route }) {
         </View>
       </Modal>
 
+    {/* IMAGE PREVIEW MODAL */}
+      <Modal visible={!!previewImage} animationType="fade" transparent>
+        <TouchableOpacity
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center' }}
+          onPress={() => setPreviewImage(null)}>
+          {previewImage && (
+            <img src={previewImage} style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: 8 }} />
+          )}
+          <Text style={{ color: '#fff', marginTop: 16, fontSize: 13 }}>Tap anywhere to close</Text>
+        </TouchableOpacity>
+      </Modal>
+
     </View>
   );
 }
@@ -2126,7 +2267,15 @@ const styles = StyleSheet.create({
   itemPriceBadgeText: { fontSize: 12, fontWeight: '600', color: '#065f46' },
   itemNoPriceBadge: { backgroundColor: '#fef3c7', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
   itemNoPriceBadgeText: { fontSize: 12, fontWeight: '600', color: '#92400e' },
-  itemDesc2: { fontSize: 13, color: '#666', marginBottom: 6 },
+  itemDesc2: { fontSize: 13, color: '#666', marginBottom: 2 },
+  itemFabric: { fontSize: 12, color: '#6b7280', marginBottom: 6 },
+  imagePlaceholder: { width: 70, height: 70, backgroundColor: '#f3f4f6', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  imagePlaceholderText: { fontSize: 28 },
+  uploadBox: { borderWidth: 2, borderColor: '#c7d2fe', borderStyle: 'dashed', borderRadius: 8, padding: 24, alignItems: 'center', marginBottom: 10, position: 'relative', backgroundColor: '#f8faff' },
+  uploadIcon: { fontSize: 32, marginBottom: 8 },
+  uploadText: { fontSize: 13, color: '#6366f1' },
+  removeImgBtn: { backgroundColor: '#fee2e2', borderRadius: 6, padding: 8, alignItems: 'center', marginTop: 6 },
+  removeImgText: { color: '#ef4444', fontSize: 13, fontWeight: '500' },
   itemTagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
   itemColorTag: { backgroundColor: '#eef2ff', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
   itemColorTagText: { fontSize: 11, color: '#4361ee', fontWeight: '500' },
@@ -2151,8 +2300,11 @@ const styles = StyleSheet.create({
   preSizeActive: { backgroundColor: '#4361ee', borderColor: '#4361ee' },
   preSizeText: { fontSize: 13, color: '#444', fontWeight: '500' },
   preSizeTextActive: { color: '#fff' },
-  noteBox: { backgroundColor: '#fef3c7', borderRadius: 8, padding: 12, marginTop: 8 },
-  noteText: { fontSize: 13, color: '#92400e' },
+  uploadBox: { borderWidth: 2, borderColor: '#c7d2fe', borderStyle: 'dashed', borderRadius: 8, padding: 24, alignItems: 'center', marginBottom: 10, position: 'relative', backgroundColor: '#f8faff' },
+  uploadIcon: { fontSize: 32, marginBottom: 8 },
+  uploadText: { fontSize: 13, color: '#6366f1' },
+  removeImgBtn: { backgroundColor: '#fee2e2', borderRadius: 6, padding: 8, alignItems: 'center', marginTop: 6 },
+  removeImgText: { color: '#ef4444', fontSize: 13, fontWeight: '500' },
   // Costing sheet styles
   costingTable: { backgroundColor: '#f8faff', borderRadius: 10, overflow: 'hidden', marginBottom: 12, borderWidth: 1, borderColor: '#e0e7ff' },
   costingTableHeader: { flexDirection: 'row', backgroundColor: '#1e1b4b', paddingVertical: 10, paddingHorizontal: 12 },

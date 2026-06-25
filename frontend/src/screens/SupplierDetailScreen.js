@@ -21,6 +21,8 @@ export default function SupplierDetailScreen({ route }) {
   const [payments, setPayments] = useState([]);
   const [parties, setParties] = useState([]);
   const [ledgerEntries, setLedgerEntries] = useState([]);
+  const [globalAccounts, setGlobalAccounts] = useState([]);
+  const [selectedGlobalAccounts, setSelectedGlobalAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
@@ -138,12 +140,15 @@ export default function SupplierDetailScreen({ route }) {
         setAccessories(accRes.data);
         setPayments(payRes.data);
       } else if (activeTab === 'Accounts') {
-        const [accRes, payRes] = await Promise.all([
+        const [accRes, payRes, globalRes] = await Promise.all([
           client.get(`/party-accounts/${supplier.id}`),
-          client.get(`/party-payments/${supplier.id}`)
+          client.get(`/party-payments/${supplier.id}`),
+          client.get('/party-accounts/global')
         ]);
         setAccounts(accRes.data);
+        setAccounts(accRes.data);
         setPayments(payRes.data);
+        setGlobalAccounts(globalRes.data);
       }
     } catch (err) { console.log(err.message); }
     finally { setLoading(false); }
@@ -340,6 +345,7 @@ export default function SupplierDetailScreen({ route }) {
       await client.post('/party-accounts', { ...accountForm, party_id: supplier.id });
       setAccountModalVisible(false);
       setAccountForm({ account_name: '', bank_name: '', account_no: '' });
+      setSelectedGlobalAccounts([]);
       fetchAll();
     } catch (err) { alert('Could not add account'); }
   };
@@ -859,6 +865,60 @@ export default function SupplierDetailScreen({ route }) {
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, isDesktop && { width: 400, borderRadius: 16, marginBottom: 40 }]}>
             <Text style={styles.modalTitle}>Add Bank Account</Text>
+            {globalAccounts.length > 0 && (
+              <>
+                <Text style={styles.label}>Quick Add from Existing Accounts</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                  {globalAccounts.map((acc, i) => {
+                    const isSelected = selectedGlobalAccounts.some(
+                      a => a.account_no === acc.account_no
+                    );
+                    return (
+                      <TouchableOpacity key={i}
+                        style={[styles.catBtn, isSelected && styles.catBtnActive]}
+                        onPress={() => {
+                          if (isSelected) {
+                            setSelectedGlobalAccounts(selectedGlobalAccounts.filter(
+                              a => a.account_no !== acc.account_no
+                            ));
+                          } else {
+                            setSelectedGlobalAccounts([...selectedGlobalAccounts, acc]);
+                          }
+                        }}>
+                        <Text style={[styles.catBtnText, isSelected && styles.catBtnTextActive]}>
+                          {isSelected ? '✓ ' : ''}{acc.account_name}
+                        </Text>
+                        <Text style={{ fontSize: 10, color: isSelected ? '#fff' : '#888' }}>
+                          {acc.bank_name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                {selectedGlobalAccounts.length > 0 && (
+                  <TouchableOpacity
+                    style={[styles.saveBtn, { marginBottom: 10 }]}
+                    onPress={async () => {
+                      try {
+                        await Promise.all(selectedGlobalAccounts.map(acc =>
+                          client.post('/party-accounts', {
+                            party_id: supplier.id,
+                            account_name: acc.account_name,
+                            bank_name: acc.bank_name,
+                            account_no: acc.account_no
+                          })
+                        ));
+                        setSelectedGlobalAccounts([]);
+                        setAccountModalVisible(false);
+                        fetchAll();
+                      } catch (err) { alert('Could not add accounts'); }
+                    }}>
+                    <Text style={styles.saveText}>+ Add {selectedGlobalAccounts.length} Selected Account{selectedGlobalAccounts.length > 1 ? 's' : ''}</Text>
+                  </TouchableOpacity>
+                )}
+                <Text style={[styles.label, { marginTop: 4 }]}>Or Add New Account</Text>
+              </>
+            )}
             <TextInput style={styles.input} placeholder="Account name *"
               value={accountForm.account_name}
               onChangeText={(v) => setAccountForm({ ...accountForm, account_name: v })} />
