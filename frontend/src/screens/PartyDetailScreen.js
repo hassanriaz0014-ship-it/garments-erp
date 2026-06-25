@@ -701,58 +701,112 @@ export default function PartyDetailScreen({ route }) {
     }
   };
 
-  const addInvItem = (item) => {
-    const existing = selectedInvItems.find(i => i.id === item.id);
-    if (existing) {
-      setSelectedInvItems(selectedInvItems.map(i =>
-        i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i
-      ));
-    } else {
-      setSelectedInvItems([...selectedInvItems, {
-        id: item.id,
-        style_no: item.style_no,
-        description: item.description,
-        colors: item.colors || [],
-        sizes: item.sizes || [],
-        price: item.selling_price || 0,
-        selectedColor: (item.colors || [])[0] || '',
-        selectedSize: (item.sizes || [])[0] || '',
-        quantity: 1
-      }]);
-    }
-  };
+  const [pendingItem, setPendingItem] = useState(null);
 
-  const removeInvItem = (id) => setSelectedInvItems(selectedInvItems.filter(i => i.id !== id));
-  const updateInvQty = (id, qty) => {
+const addInvItem = (item) => {
+  setPendingItem({
+    id: item.id,
+    style_no: item.style_no,
+    description: item.description,
+    colors: item.colors || [],
+    sizes: item.sizes || [],
+    price: item.selling_price || 0,
+    selectedColor: '',
+    selectedSize: '',
+  });
+};
+
+const confirmAddInvItem = () => {
+  if (!pendingItem) return;
+  const lineId = `${pendingItem.id}_${pendingItem.selectedColor}_${pendingItem.selectedSize}_${Date.now()}`;
+  setSelectedInvItems([...selectedInvItems, {
+    ...pendingItem,
+    lineId,
+    quantity: 1
+  }]);
+  setPendingItem(null);
+};
+
+  const removeInvItem = (lineId) => setSelectedInvItems(selectedInvItems.filter(i => i.lineId !== lineId));
+  const updateInvQty = (lineId, qty) => {
     if (qty < 1) return;
-    setSelectedInvItems(selectedInvItems.map(i => i.id === id ? { ...i, quantity: qty } : i));
+    setSelectedInvItems(selectedInvItems.map(i => i.lineId === lineId ? { ...i, quantity: qty } : i));
   };
-  const updateInvItemField = (id, field, value) => {
-    setSelectedInvItems(selectedInvItems.map(i => i.id === id ? { ...i, [field]: value } : i));
+  const updateInvItemField = (lineId, field, value) => {
+    setSelectedInvItems(selectedInvItems.map(i => i.lineId === lineId ? { ...i, [field]: value } : i));
   };
-
-  const saveInvoice = async () => {
-    if (!invForm.invoice_no || !invForm.issue_date) { alert('Invoice number and date are required'); return; }
-    const remaining = invTotal - invAmountPaid;
-    let status = 'Pending';
-    if (invAmountPaid >= invTotal && invTotal > 0) status = 'Paid';
-    else if (invAmountPaid > 0) status = 'Partial';
-    try {
-      await client.post('/invoices', {
-        ...invForm, party_id: party.id, type: 'Sale', shipment_type: 'Air',
-        subtotal: invSubtotal, total: invTotal, advance: invAdvance,
-        freight_charges: invFreight, amount_paid: invAmountPaid, remaining, status,
-        items: selectedInvItems.map(i => ({
-          description: `${i.style_no}${i.selectedColor ? ' | ' + i.selectedColor : ''}${i.selectedSize ? ' | Size: ' + i.selectedSize : ''}${i.description ? ' | ' + i.description : ''}`,
-          quantity: i.quantity, unit_price: i.price
-        }))
+const saveInvoice = async () => {
+  if (!invForm.invoice_no || !invForm.issue_date) { alert('Invoice number and date are required'); return; }
+  const remaining = invTotal - invAmountPaid;
+  let status = 'Pending';
+  if (invAmountPaid >= invTotal && invTotal > 0) status = 'Paid';
+  else if (invAmountPaid > 0) status = 'Partial';
+  try {
+    const payload = {
+      ...invForm, party_id: party.id, type: 'Sale', shipment_type: 'Air',
+      subtotal: invSubtotal, total: invTotal, advance: invAdvance,
+      freight_charges: invFreight, amount_paid: invAmountPaid, remaining, status,
+      items: selectedInvItems.map(i => ({
+        description: i.selectedColor || i.selectedSize
+          ? `${i.style_no}${i.selectedColor ? ' | ' + i.selectedColor : ''}${i.selectedSize ? ' | Size: ' + i.selectedSize : ''}`
+          : i.style_no || i.description,
+        quantity: i.quantity, unit_price: i.price
+      }))
+    };
+    if (editingInvoice) {
+      await client.put(`/invoices/${editingInvoice.id}`, {
+        ...payload,
+        discount: editingInvoice.discount || 0,
+        tax: editingInvoice.tax || 0,
+        paid: invAmountPaid,
+        notes: invForm.notes
       });
-      setModalVisible(false);
-      setInvForm({ invoice_no: '', issue_date: '', due_date: '', advance: '0', freight_charges: '0', amount_paid: '0', status: 'Pending', notes: '', shipment_type: 'Air' });
-      setSelectedInvItems([]);
-      fetchAll();
-    } catch (err) { alert('Could not save invoice'); }
-  };
+    } else {
+      await client.post('/invoices', payload);
+    }
+    setModalVisible(false);
+    setEditingInvoice(null);
+    setInvForm({ invoice_no: '', issue_date: '', due_date: '', advance: '0', freight_charges: '0', amount_paid: '0', status: 'Pending', notes: '', shipment_type: 'Air' });
+    setSelectedInvItems([]);
+    fetchAll();
+  } catch (err) { alert('Could not save invoice'); }
+};
+
+  const openFullEditInvoice = async (inv) => {
+  try {
+    const res = await client.get(`/invoices/${inv.id}`);
+    const full = res.data;
+    setEditingInvoice(full);
+    setInvForm({
+      invoice_no: full.invoice_no || '',
+      issue_date: full.issue_date ? full.issue_date.toString().split('T')[0] : '',
+      due_date: full.due_date ? full.due_date.toString().split('T')[0] : '',
+      advance: String(full.advance || '0'),
+      freight_charges: String(full.freight_charges || '0'),
+      amount_paid: String(full.amount_paid || '0'),
+      status: full.status || 'Pending',
+      notes: full.notes || '',
+      shipment_type: full.shipment_type || 'Air'
+    });
+    // Load existing line items
+    const lineItems = full.items || [];
+    setSelectedInvItems(lineItems.map((item, idx) => ({
+      lineId: `existing_${item.id}_${idx}`,
+      id: idx,
+      style_no: item.description || '',
+      description: item.description || '',
+      colors: [],
+      sizes: [],
+      price: parseFloat(item.unit_price || 0),
+      selectedColor: '',
+      selectedSize: '',
+      quantity: parseFloat(item.quantity || 1)
+    })));
+    setModalVisible(true);
+  } catch (err) {
+    alert('Could not load invoice');
+  }
+};
 
   const openEditPayment = (inv) => {
     setEditingInvoice(inv);
@@ -1101,7 +1155,15 @@ export default function PartyDetailScreen({ route }) {
                       const remaining = parseFloat(inv.total || 0) - parseFloat(inv.amount_paid || 0);
                       return (
                         <View key={inv.id} style={[styles.tr, i % 2 === 0 && styles.trEven]}>
-                          <Text style={[styles.td, { flex: 1.5 }]}>{inv.invoice_no}</Text>
+                          <View style={{ flex: 1.5, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Text style={[styles.td, { fontWeight: '600' }]}>{inv.invoice_no}</Text>
+                            <TouchableOpacity onPress={() => openFullEditInvoice(inv)}>
+                              <Text style={{ fontSize: 14 }}>✏️</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => openEditPayment(inv)}>
+                              <Text style={{ fontSize: 14 }}>💳</Text>
+                            </TouchableOpacity>
+                          </View>
                           {isDesktop && <Text style={[styles.td, { flex: 1.2 }]}>{inv.issue_date?.toString().split('T')[0]}</Text>}
                           <Text style={[styles.td, { flex: 1.2, color: '#4361ee', fontWeight: '600' }]}>PKR {parseInt(inv.total || 0).toLocaleString()}</Text>
                           <Text style={[styles.td, { flex: 1.2, color: '#16a34a', fontWeight: '600' }]}>PKR {parseInt(inv.amount_paid || 0).toLocaleString()}</Text>
@@ -1113,7 +1175,6 @@ export default function PartyDetailScreen({ route }) {
                           </View>
                           <View style={{ flex: 1, flexDirection: 'row', gap: 4 }}>
                             <TouchableOpacity onPress={() => printInvoice(inv)}><Text style={styles.del}>🖨️</Text></TouchableOpacity>
-                            <TouchableOpacity onPress={() => openEditPayment(inv)}><Text style={styles.del}>✏️</Text></TouchableOpacity>
                             <TouchableOpacity onPress={() => deleteInvoice(inv.id)}><Text style={styles.del}>🗑️</Text></TouchableOpacity>
                           </View>
                         </View>
@@ -1444,125 +1505,348 @@ export default function PartyDetailScreen({ route }) {
       )}
 
       {/* INVOICE MODAL */}
-      {activeTab === 'Invoices' && (
-        <Modal visible={modalVisible} animationType="slide" transparent>
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modal, isDesktop && styles.modalDesktop]}>
-              <Text style={styles.modalTitle}>✈️ New Air Invoice — {party.name}</Text>
-              <ScrollView>
-                <TextInput style={styles.input} placeholder="Invoice number *"
-                  value={invForm.invoice_no} onChangeText={(v) => setInvForm({ ...invForm, invoice_no: v })} />
-                <DatePicker label="Issue Date *" value={invForm.issue_date}
-                  onChange={(v) => setInvForm({ ...invForm, issue_date: v })} />
-                <DatePicker label="Due Date" value={invForm.due_date}
-                  onChange={(v) => setInvForm({ ...invForm, due_date: v })} />
+{activeTab === 'Invoices' && (
+  <Modal visible={modalVisible} animationType="slide" transparent>
+    <View style={styles.modalOverlay}>
+      <View style={[styles.modal, isDesktop && styles.modalDesktop]}>
+        <Text style={styles.modalTitle}>{editingInvoice ? '✏️ Edit Invoice' : '✈️ New Air Invoice'} — {party.name}</Text>
+        <ScrollView>
+          <View style={isDesktop ? { flexDirection: 'row', gap: 16, alignItems: 'flex-start' } : {}}>
 
-                <Text style={styles.label}>Select Items / Styles</Text>
-                {allItems.length === 0
-                  ? <Text style={{ color: '#888', fontSize: 13, marginBottom: 10 }}>No items for this party yet.</Text>
-                  : (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
-                      {allItems.map((item) => (
-                        <TouchableOpacity key={item.id} style={styles.styleBtn} onPress={() => addInvItem(item)}>
-                          <Text style={styles.styleBtnNo}>{item.style_no}</Text>
-                          <Text style={styles.styleBtnColor}>{item.description || ''}</Text>
-                          <Text style={styles.styleBtnPrice}>PKR {parseInt(item.selling_price || 0).toLocaleString()}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  )
-                }
+            {/* LEFT — FORM */}
+            <View style={isDesktop ? { flex: 1 } : {}}>
 
-                {selectedInvItems.length > 0 && (
-                  <View style={styles.selectedItems}>
-                    <Text style={styles.label}>Selected Items</Text>
-                    {selectedInvItems.map((item) => (
-                      <View key={item.id} style={styles.selectedItem}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.selectedItemName}>{item.style_no}</Text>
-                          <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                            {item.colors && item.colors.length > 0 && (
-                              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                                {item.colors.map(c => (
-                                  <TouchableOpacity key={c}
-                                    style={[styles.invColorBtn, item.selectedColor === c && styles.invColorBtnActive]}
-                                    onPress={() => updateInvItemField(item.id, 'selectedColor', c)}>
-                                    <Text style={[styles.invColorBtnText, item.selectedColor === c && styles.invColorBtnTextActive]}>{c}</Text>
-                                  </TouchableOpacity>
-                                ))}
-                              </ScrollView>
-                            )}
-                          </View>
-                          <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-                            {item.sizes && item.sizes.map(s => (
-                              <TouchableOpacity key={s}
-                                style={[styles.invSizeBtn, item.selectedSize === s && styles.invSizeBtnActive]}
-                                onPress={() => updateInvItemField(item.id, 'selectedSize', s)}>
-                                <Text style={[styles.invSizeBtnText, item.selectedSize === s && styles.invSizeBtnTextActive]}>{s}</Text>
-                              </TouchableOpacity>
-                            ))}
-                          </View>
-                          <Text style={styles.selectedItemPrice}>
-                            PKR {parseInt(item.price || 0).toLocaleString()} × {item.quantity} = PKR {parseInt((item.price || 0) * item.quantity).toLocaleString()}
-                          </Text>
-                        </View>
-                        <View style={styles.qtyControls}>
-                          <TouchableOpacity style={styles.qtyBtn} onPress={() => updateInvQty(item.id, item.quantity - 1)}>
-                            <Text style={styles.qtyBtnText}>−</Text>
-                          </TouchableOpacity>
-                          <TextInput
-                            style={styles.qtyInput}
-                            value={String(item.quantity)}
-                            onChangeText={(v) => { const num = parseInt(v); if (!isNaN(num) && num > 0) updateInvQty(item.id, num); }}
-                            keyboardType="numeric"
-                          />
-                          <TouchableOpacity style={styles.qtyBtn} onPress={() => updateInvQty(item.id, item.quantity + 1)}>
-                            <Text style={styles.qtyBtnText}>+</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity onPress={() => removeInvItem(item.id)}>
-                            <Text style={{ color: '#ef4444', marginLeft: 8 }}>🗑️</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
+              <TextInput style={styles.input} placeholder="Invoice number *"
+                value={invForm.invoice_no} onChangeText={(v) => setInvForm({ ...invForm, invoice_no: v })} />
+
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <DatePicker label="Issue Date *" value={invForm.issue_date}
+                    onChange={(v) => setInvForm({ ...invForm, issue_date: v })} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <DatePicker label="Due Date" value={invForm.due_date}
+                    onChange={(v) => setInvForm({ ...invForm, due_date: v })} />
+                </View>
+              </View>
+
+              <Text style={styles.label}>Select Items / Styles</Text>
+              {allItems.length === 0
+                ? <Text style={{ color: '#888', fontSize: 13, marginBottom: 10 }}>No items for this party yet.</Text>
+                : (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                    {allItems.map((item) => (
+                      <TouchableOpacity key={item.id} style={styles.styleBtn} onPress={() => addInvItem(item)}>
+                        <Text style={styles.styleBtnNo}>{item.style_no}</Text>
+                        <Text style={styles.styleBtnColor}>{item.description || ''}</Text>
+                        <Text style={styles.styleBtnPrice}>PKR {parseInt(item.selling_price || 0).toLocaleString()}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                )
+              }
+
+                            {/* PENDING ITEM PICKER */}
+              {pendingItem && (
+                <View style={styles.pendingItemBox}>
+                  <Text style={styles.pendingItemTitle}>{pendingItem.style_no} — Select Color & Size</Text>
+                  <Text style={styles.label}>Color</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                    {pendingItem.colors.map(c => (
+                      <TouchableOpacity key={c}
+                        style={[styles.invColorBtn, pendingItem.selectedColor === c && styles.invColorBtnActive]}
+                        onPress={() => setPendingItem({ ...pendingItem, selectedColor: c })}>
+                        <Text style={[styles.invColorBtnText, pendingItem.selectedColor === c && styles.invColorBtnTextActive]}>{c}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                  <Text style={styles.label}>Size</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                    {pendingItem.sizes.map(s => (
+                      <TouchableOpacity key={s}
+                        style={[styles.invSizeBtn, pendingItem.selectedSize === s && styles.invSizeBtnActive]}
+                        onPress={() => setPendingItem({ ...pendingItem, selectedSize: s })}>
+                        <Text style={[styles.invSizeBtnText, pendingItem.selectedSize === s && styles.invSizeBtnTextActive]}>{s}</Text>
+                      </TouchableOpacity>
                     ))}
                   </View>
-                )}
-
-                <View style={styles.totalsBox}>
-                  <View style={styles.totalRow}>
-                    <Text style={styles.totalLabel}>Subtotal</Text>
-                    <Text style={styles.totalValue}>PKR {invSubtotal.toLocaleString()}</Text>
-                  </View>
-                  <TextInput style={styles.input} placeholder="Freight Charges PKR"
-                    value={invForm.freight_charges} onChangeText={(v) => setInvForm({ ...invForm, freight_charges: v })} keyboardType="numeric" />
-                  <TextInput style={styles.input} placeholder="Advance PKR"
-                    value={invForm.advance} onChangeText={(v) => setInvForm({ ...invForm, advance: v })} keyboardType="numeric" />
-                  <View style={[styles.totalRow, { borderTopWidth: 1, borderTopColor: '#e5e7eb', paddingTop: 8, marginTop: 4 }]}>
-                    <Text style={[styles.totalLabel, { fontWeight: 'bold', color: '#1e1b4b', fontSize: 15 }]}>Total</Text>
-                    <Text style={[styles.totalValue, { color: '#4361ee', fontWeight: 'bold', fontSize: 16 }]}>PKR {invTotal.toLocaleString()}</Text>
-                  </View>
-                  <TextInput style={styles.input} placeholder="Amount Paid PKR"
-                    value={invForm.amount_paid} onChangeText={(v) => setInvForm({ ...invForm, amount_paid: v })} keyboardType="numeric" />
-                  <View style={styles.totalRow}>
-                    <Text style={[styles.totalLabel, { color: '#ef4444' }]}>Remaining</Text>
-                    <Text style={[styles.totalValue, { color: '#ef4444', fontWeight: 'bold' }]}>PKR {invRemaining.toLocaleString()}</Text>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity style={styles.cancelBtn} onPress={() => setPendingItem(null)}>
+                      <Text style={styles.cancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.saveBtn} onPress={confirmAddInvItem}>
+                      <Text style={styles.saveText}>+ Add Line</Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
-                <TextInput style={styles.input} placeholder="Notes"
-                  value={invForm.notes} onChangeText={(v) => setInvForm({ ...invForm, notes: v })} />
-              </ScrollView>
-              <View style={styles.modalActions}>
-                <TouchableOpacity style={styles.cancelBtn} onPress={() => { setModalVisible(false); setSelectedInvItems([]); }}>
-                  <Text style={styles.cancelText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.saveBtn} onPress={saveInvoice}>
-                  <Text style={styles.saveText}>Save Invoice</Text>
-                </TouchableOpacity>
+              )}
+
+              {/* SELECTED LINE ITEMS */}
+              {selectedInvItems.length > 0 && (
+                <View style={styles.selectedItems}>
+                  <Text style={styles.label}>Selected Items ({selectedInvItems.length} lines)</Text>
+                  {selectedInvItems.map((item) => (
+                    <View key={item.lineId} style={styles.selectedItem}>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <View style={styles.lineBadge}>
+                            <Text style={styles.lineBadgeText}>{item.style_no}</Text>
+                          </View>
+                          {item.selectedColor ? <Text style={{ fontSize: 12, color: '#4361ee' }}>{item.selectedColor}</Text> : null}
+                          {item.selectedSize ? <View style={styles.sizeBadge}><Text style={styles.sizeBadgeText}>{item.selectedSize}</Text></View> : null}
+                        </View>
+                        <Text style={styles.selectedItemPrice}>
+                          PKR {parseInt(item.price || 0).toLocaleString()} × {item.quantity} = PKR {parseInt((item.price || 0) * item.quantity).toLocaleString()}
+                        </Text>
+                      </View>
+                      <View style={styles.qtyControls}>
+                        <TouchableOpacity style={styles.qtyBtn} onPress={() => updateInvQty(item.lineId, item.quantity - 1)}>
+                          <Text style={styles.qtyBtnText}>−</Text>
+                        </TouchableOpacity>
+                        <TextInput
+                          style={styles.qtyInput}
+                          value={String(item.quantity)}
+                          onChangeText={(v) => { const num = parseInt(v); if (!isNaN(num) && num > 0) updateInvQty(item.lineId, num); }}
+                          keyboardType="numeric"
+                        />
+                        <TouchableOpacity style={styles.qtyBtn} onPress={() => updateInvQty(item.lineId, item.quantity + 1)}>
+                          <Text style={styles.qtyBtnText}>+</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => removeInvItem(item.lineId)}>
+                          <Text style={{ color: '#ef4444', marginLeft: 8 }}>🗑️</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Freight (PKR)</Text>
+                  <TextInput style={styles.input} placeholder="0"
+                    value={invForm.freight_charges}
+                    onChangeText={(v) => setInvForm({ ...invForm, freight_charges: v })}
+                    keyboardType="numeric" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Advance (PKR)</Text>
+                  <TextInput style={styles.input} placeholder="0"
+                    value={invForm.advance}
+                    onChangeText={(v) => setInvForm({ ...invForm, advance: v })}
+                    keyboardType="numeric" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Amount Paid (PKR)</Text>
+                  <TextInput style={styles.input} placeholder="0"
+                    value={invForm.amount_paid}
+                    onChangeText={(v) => setInvForm({ ...invForm, amount_paid: v })}
+                    keyboardType="numeric" />
+                </View>
               </View>
+
+              <TextInput style={styles.input} placeholder="Notes (optional)"
+                value={invForm.notes} onChangeText={(v) => setInvForm({ ...invForm, notes: v })} />
+
+              {/* PREVIEW on mobile — below form */}
+              {!isDesktop && (
+                <View style={styles.invPreviewBox}>
+                  <View style={styles.invPreviewHeader}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View style={styles.invPreviewLogo}>
+                        <Text style={{ color: '#d4af37', fontSize: 10, fontWeight: 'bold' }}>RS</Text>
+                      </View>
+                      <Text style={styles.invPreviewCompany}>RS APPARELS</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={styles.invPreviewNo}>{invForm.invoice_no || 'INV-???'}</Text>
+                      <View style={[styles.invStatusBadge,
+                        invAmountPaid >= invTotal && invTotal > 0 ? styles.invStatusPaid :
+                        invAmountPaid > 0 ? styles.invStatusPartial : styles.invStatusPending]}>
+                        <Text style={styles.invStatusText}>
+                          {invAmountPaid >= invTotal && invTotal > 0 ? 'Paid' :
+                           invAmountPaid > 0 ? 'Partial' : 'Pending'}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                  <View style={styles.invPreviewInfoRow}>
+                    <View style={styles.invPreviewInfoBox}>
+                      <Text style={styles.invPreviewInfoLabel}>PARTY</Text>
+                      <Text style={styles.invPreviewInfoValue}>{party.name}</Text>
+                    </View>
+                    <View style={styles.invPreviewInfoBox}>
+                      <Text style={styles.invPreviewInfoLabel}>DATE</Text>
+                      <Text style={styles.invPreviewInfoValue}>
+                        {invForm.issue_date ? invForm.issue_date.split('-').reverse().join('/') : '—'}
+                      </Text>
+                    </View>
+                    <View style={styles.invPreviewInfoBox}>
+                      <Text style={styles.invPreviewInfoLabel}>DUE</Text>
+                      <Text style={styles.invPreviewInfoValue}>
+                        {invForm.due_date ? invForm.due_date.split('-').reverse().join('/') : '—'}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.invPreviewTable}>
+                    <View style={styles.invPreviewTableHeader}>
+                      <Text style={[styles.invPreviewTh, { flex: 2 }]}>Description</Text>
+                      <Text style={[styles.invPreviewTh, { flex: 0.5, textAlign: 'center' }]}>Qty</Text>
+                      <Text style={[styles.invPreviewTh, { flex: 1, textAlign: 'right' }]}>Amount</Text>
+                    </View>
+                    {selectedInvItems.length === 0
+                      ? <Text style={{ textAlign: 'center', color: '#888', fontSize: 12, padding: 12 }}>No items added yet</Text>
+                      : selectedInvItems.map((item, i) => (
+                        <View key={item.id} style={[styles.invPreviewTableRow, i % 2 === 0 && { backgroundColor: '#f9fafb' }]}>
+                          <Text style={[styles.invPreviewTd, { flex: 2 }]}>
+                            {item.style_no}{item.selectedColor ? ` · ${item.selectedColor}` : ''}{item.selectedSize ? ` · ${item.selectedSize}` : ''}
+                          </Text>
+                          <Text style={[styles.invPreviewTd, { flex: 0.5, textAlign: 'center' }]}>{item.quantity}</Text>
+                          <Text style={[styles.invPreviewTd, { flex: 1, textAlign: 'right', color: '#4361ee' }]}>
+                            PKR {parseInt((item.price || 0) * item.quantity).toLocaleString()}
+                          </Text>
+                        </View>
+                      ))
+                    }
+                  </View>
+                  <View style={styles.invPreviewSummary}>
+                    <View style={styles.invPreviewSummaryRow}>
+                      <Text style={styles.invPreviewSummaryLabel}>Subtotal</Text>
+                      <Text style={styles.invPreviewSummaryValue}>PKR {invSubtotal.toLocaleString()}</Text>
+                    </View>
+                    <View style={styles.invPreviewSummaryRow}>
+                      <Text style={[styles.invPreviewSummaryLabel, { color: '#16a34a' }]}>Freight +</Text>
+                      <Text style={[styles.invPreviewSummaryValue, { color: '#16a34a' }]}>PKR {parseFloat(invForm.freight_charges || 0).toLocaleString()}</Text>
+                    </View>
+                    <View style={styles.invPreviewSummaryRow}>
+                      <Text style={[styles.invPreviewSummaryLabel, { color: '#ef4444' }]}>Advance −</Text>
+                      <Text style={[styles.invPreviewSummaryValue, { color: '#ef4444' }]}>PKR {parseFloat(invForm.advance || 0).toLocaleString()}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.invPreviewTotalBox}>
+                    <Text style={styles.invPreviewTotalLabel}>TOTAL</Text>
+                    <Text style={styles.invPreviewTotalValue}>PKR {invTotal.toLocaleString()}</Text>
+                  </View>
+                  <View style={styles.invPreviewPaidRow}>
+                    <Text style={{ fontSize: 12, color: '#16a34a' }}>Paid: PKR {parseFloat(invForm.amount_paid || 0).toLocaleString()}</Text>
+                    <Text style={{ fontSize: 12, color: '#ef4444', fontWeight: '600' }}>Remaining: PKR {invRemaining.toLocaleString()}</Text>
+                  </View>
+                  <View style={styles.invLiveBadge}>
+                    <View style={styles.invLiveDot} />
+                    <Text style={{ fontSize: 10, color: '#16a34a' }}>Live preview</Text>
+                  </View>
+                </View>
+              )}
+
             </View>
+
+            {/* RIGHT — PREVIEW on desktop */}
+            {isDesktop && (
+              <View style={{ width: 360 }}>
+                <Text style={[styles.label, { marginBottom: 8 }]}>
+                  <View style={styles.invLiveBadge}>
+                    <View style={styles.invLiveDot} />
+                    <Text style={{ fontSize: 10, color: '#16a34a' }}>Live preview</Text>
+                  </View>
+                </Text>
+                <View style={styles.invPreviewBox}>
+                  <View style={styles.invPreviewHeader}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View style={styles.invPreviewLogo}>
+                        <Text style={{ color: '#d4af37', fontSize: 10, fontWeight: 'bold' }}>RS</Text>
+                      </View>
+                      <Text style={styles.invPreviewCompany}>RS APPARELS</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={styles.invPreviewNo}>{invForm.invoice_no || 'INV-???'}</Text>
+                      <View style={[styles.invStatusBadge,
+                        invAmountPaid >= invTotal && invTotal > 0 ? styles.invStatusPaid :
+                        invAmountPaid > 0 ? styles.invStatusPartial : styles.invStatusPending]}>
+                        <Text style={styles.invStatusText}>
+                          {invAmountPaid >= invTotal && invTotal > 0 ? 'Paid' :
+                           invAmountPaid > 0 ? 'Partial' : 'Pending'}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                  <View style={styles.invPreviewInfoRow}>
+                    <View style={styles.invPreviewInfoBox}>
+                      <Text style={styles.invPreviewInfoLabel}>PARTY</Text>
+                      <Text style={styles.invPreviewInfoValue} numberOfLines={1}>{party.name}</Text>
+                    </View>
+                    <View style={styles.invPreviewInfoBox}>
+                      <Text style={styles.invPreviewInfoLabel}>DATE</Text>
+                      <Text style={styles.invPreviewInfoValue}>
+                        {invForm.issue_date ? invForm.issue_date.split('-').reverse().join('/') : '—'}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.invPreviewTable}>
+                    <View style={styles.invPreviewTableHeader}>
+                      <Text style={[styles.invPreviewTh, { flex: 2 }]}>Description</Text>
+                      <Text style={[styles.invPreviewTh, { flex: 0.5, textAlign: 'center' }]}>Qty</Text>
+                      <Text style={[styles.invPreviewTh, { flex: 1, textAlign: 'right' }]}>Amt</Text>
+                    </View>
+                    {selectedInvItems.length === 0
+                      ? <Text style={{ textAlign: 'center', color: '#888', fontSize: 11, padding: 10 }}>No items yet</Text>
+                      : selectedInvItems.map((item, i) => (
+                        <View key={item.id} style={[styles.invPreviewTableRow, i % 2 === 0 && { backgroundColor: '#f9fafb' }]}>
+                          <Text style={[styles.invPreviewTd, { flex: 2 }]} numberOfLines={1}>
+                            {item.style_no}{item.selectedColor ? ` · ${item.selectedColor}` : ''}
+                          </Text>
+                          <Text style={[styles.invPreviewTd, { flex: 0.5, textAlign: 'center' }]}>{item.quantity}</Text>
+                          <Text style={[styles.invPreviewTd, { flex: 1, textAlign: 'right', color: '#4361ee' }]}>
+                            {parseInt((item.price || 0) * item.quantity).toLocaleString()}
+                          </Text>
+                        </View>
+                      ))
+                    }
+                  </View>
+                  <View style={styles.invPreviewSummary}>
+                    <View style={styles.invPreviewSummaryRow}>
+                      <Text style={styles.invPreviewSummaryLabel}>Subtotal</Text>
+                      <Text style={styles.invPreviewSummaryValue}>PKR {invSubtotal.toLocaleString()}</Text>
+                    </View>
+                    <View style={styles.invPreviewSummaryRow}>
+                      <Text style={[styles.invPreviewSummaryLabel, { color: '#16a34a' }]}>Freight +</Text>
+                      <Text style={[styles.invPreviewSummaryValue, { color: '#16a34a' }]}>PKR {parseFloat(invForm.freight_charges || 0).toLocaleString()}</Text>
+                    </View>
+                    <View style={styles.invPreviewSummaryRow}>
+                      <Text style={[styles.invPreviewSummaryLabel, { color: '#ef4444' }]}>Advance −</Text>
+                      <Text style={[styles.invPreviewSummaryValue, { color: '#ef4444' }]}>PKR {parseFloat(invForm.advance || 0).toLocaleString()}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.invPreviewTotalBox}>
+                    <Text style={styles.invPreviewTotalLabel}>TOTAL</Text>
+                    <Text style={styles.invPreviewTotalValue}>PKR {invTotal.toLocaleString()}</Text>
+                  </View>
+                  <View style={styles.invPreviewPaidRow}>
+                    <Text style={{ fontSize: 11, color: '#16a34a' }}>Paid: PKR {parseFloat(invForm.amount_paid || 0).toLocaleString()}</Text>
+                    <Text style={{ fontSize: 11, color: '#ef4444', fontWeight: '600' }}>Left: PKR {invRemaining.toLocaleString()}</Text>
+                  </View>
+                  {invForm.notes ? (
+                    <Text style={{ fontSize: 10, color: '#888', padding: 8, borderTopWidth: 0.5, borderTopColor: '#e5e7eb' }}>
+                      {invForm.notes}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            )}
+
           </View>
-        </Modal>
-      )}
+        </ScrollView>
+        <View style={styles.modalActions}>
+          <TouchableOpacity style={styles.cancelBtn} onPress={() => { setModalVisible(false); setSelectedInvItems([]); setEditingInvoice(null); }}>
+            <Text style={styles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.saveBtn} onPress={saveInvoice}>
+            <Text style={styles.saveText}>Save Invoice</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  </Modal>
+)}
 
       {/* EDIT PAYMENT MODAL */}
       <Modal visible={editPaymentVisible} animationType="fade" transparent>
@@ -2375,8 +2659,8 @@ const styles = StyleSheet.create({
   typeBtnText: { color: '#444', fontWeight: '500' },
   typeBtnTextActive: { color: '#fff' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end', alignItems: 'center' },
-  modal: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, maxHeight: '95%', width: '100%' },
-  modalDesktop: { borderRadius: 16, width: 680, marginBottom: 40 },
+  modal: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, maxHeight: '98%', width: '100%' },
+  modalDesktop: { borderRadius: 16, width: 960, marginBottom: 40 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 4, color: '#1e1b4b' },
   modalSub: { fontSize: 13, color: '#666', marginBottom: 16 },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 11, fontSize: 14, marginBottom: 10 },
@@ -2384,5 +2668,41 @@ const styles = StyleSheet.create({
   cancelBtn: { flex: 1, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', alignItems: 'center' },
   cancelText: { color: '#666', fontWeight: '500' },
   saveBtn: { flex: 1, padding: 12, borderRadius: 8, backgroundColor: '#4361ee', alignItems: 'center' },
-  saveText: { color: '#fff', fontWeight: '600' }
+  saveText: { color: '#fff', fontWeight: '600' },
+  // Invoice preview styles
+  invPreviewBox: { borderWidth: 1, borderColor: '#e0e7ff', borderRadius: 12, overflow: 'hidden', marginTop: 12, marginBottom: 10 },
+  invPreviewHeader: { backgroundColor: '#1e1b4b', padding: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  invPreviewLogo: { width: 28, height: 28, backgroundColor: '#000', borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
+  invPreviewCompany: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  invPreviewNo: { color: '#a5b4fc', fontSize: 16, fontWeight: '600' },
+  invStatusBadge: { borderRadius: 20, paddingHorizontal: 8, paddingVertical: 2, marginTop: 4 },
+  invStatusPaid: { backgroundColor: '#065f46' },
+  invStatusPartial: { backgroundColor: '#3730a3' },
+  invStatusPending: { backgroundColor: '#92400e' },
+  invStatusText: { color: '#fff', fontSize: 10, fontWeight: '600' },
+  invPreviewInfoRow: { flexDirection: 'row', backgroundColor: '#f8faff', borderBottomWidth: 0.5, borderBottomColor: '#e0e7ff' },
+  invPreviewInfoBox: { flex: 1, padding: 8, borderRightWidth: 0.5, borderRightColor: '#e0e7ff' },
+  invPreviewInfoLabel: { fontSize: 9, color: '#888', marginBottom: 2 },
+  invPreviewInfoValue: { fontSize: 11, fontWeight: '600', color: '#1e1b4b' },
+  invPreviewTable: { backgroundColor: '#fff' },
+  invPreviewTableHeader: { flexDirection: 'row', backgroundColor: '#1e1b4b', paddingVertical: 6, paddingHorizontal: 10 },
+  invPreviewTh: { color: '#fff', fontSize: 10, fontWeight: '600' },
+  invPreviewTableRow: { flexDirection: 'row', paddingVertical: 6, paddingHorizontal: 10 },
+  invPreviewTd: { fontSize: 11, color: '#374151' },
+  invPreviewSummary: { padding: 10, borderTopWidth: 0.5, borderTopColor: '#e5e7eb', backgroundColor: '#f9fafb' },
+  invPreviewSummaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 },
+  invPreviewSummaryLabel: { fontSize: 11, color: '#666' },
+  invPreviewSummaryValue: { fontSize: 11, fontWeight: '500', color: '#374151' },
+  invPreviewTotalBox: { backgroundColor: '#1e1b4b', padding: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  invPreviewTotalLabel: { color: '#a5b4fc', fontSize: 11, fontWeight: '600', letterSpacing: 1 },
+  invPreviewTotalValue: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+  invPreviewPaidRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, backgroundColor: '#f9fafb' },
+  invLiveBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, padding: 6, justifyContent: 'center', backgroundColor: '#f0fdf4' },
+  invLiveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#16a34a' },
+  pendingItemBox: { backgroundColor: '#f8faff', borderRadius: 10, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#c7d2fe' },
+  pendingItemTitle: { fontSize: 14, fontWeight: '600', color: '#1e1b4b', marginBottom: 10 },
+  lineBadge: { backgroundColor: '#eef2ff', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  lineBadgeText: { fontSize: 12, fontWeight: '600', color: '#4361ee' },
+  sizeBadge: { backgroundColor: '#f3f4f6', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  sizeBadgeText: { fontSize: 12, color: '#374151', fontWeight: '500' },
 });
