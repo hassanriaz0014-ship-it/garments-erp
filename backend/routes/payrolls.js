@@ -80,7 +80,7 @@ router.post('/', protect, async (req, res) => {
         basic_salary || 0, bonus || 0, deductions || 0, advance || 0,
         notes, status || 'Paid',
         payroll_type || 'Monthly',
-        week_start || null, week_end || null,
+        week_start ? week_start + 'T12:00:00' : null, week_end ? week_end + 'T12:00:00' : null,
         pieces_count || 0, days_count || 0, orders_count || 0,
         net_pay || total_pay || 0, net_pay || total_pay || 0,
         JSON.stringify(payroll_items || [])
@@ -116,7 +116,7 @@ router.put('/:id', protect, async (req, res) => {
         basic_salary || 0, bonus || 0, deductions || 0, advance || 0,
         notes, status || 'Paid',
         payroll_type || 'Monthly',
-        week_start || null, week_end || null,
+        week_start ? week_start + 'T12:00:00' : null, week_end ? week_end + 'T12:00:00' : null,
         pieces_count || 0, days_count || 0, orders_count || 0,
         net_pay || total_pay || 0, net_pay || total_pay || 0,
         JSON.stringify(payroll_items || []),
