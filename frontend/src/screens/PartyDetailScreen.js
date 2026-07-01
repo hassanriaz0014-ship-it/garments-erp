@@ -99,14 +99,17 @@ export default function PartyDetailScreen({ route }) {
     account_id: '', account_name: '', amount: '', date: '', notes: ''
   });
   const [poForm, setPoForm] = useState({
-    po_number: '', po_date: '', article_name: '',
+    po_number: '', po_date: '', style_no: '', description: '',
     fabric_details: '', status: 'Pending', notes: ''
   });
-  const [poItems, setPoItems] = useState([{
-    id: Date.now(), style_no: '', description: '', color: '', sizes: {}, total_pieces: 0
+  const [poColorRows, setPoColorRows] = useState([{
+    id: Date.now(), color: '', sizes: {}, cut_sizes: {}
   }]);
-  const [poSizeNumbers, setPoSizeNumbers] = useState(['50', '52', '54']);
+  const [poSizeNumbers, setPoSizeNumbers] = useState(['S', 'M', 'L', 'XL', 'XXL']);
   const [newPoSizeNumber, setNewPoSizeNumber] = useState('');
+  const [cuttingPoModalVisible, setCuttingPoModalVisible] = useState(false);
+  const [cuttingPoItem, setCuttingPoItem] = useState(null);
+  const [cuttingPoTarget, setCuttingPoTarget] = useState(null);
 
   useEffect(() => { fetchAll(); fetchCategories(); }, [activeTab]);
 
@@ -319,54 +322,100 @@ export default function PartyDetailScreen({ route }) {
   };
 
   // PO functions
-  const addPoItem = () => setPoItems([...poItems, { id: Date.now(), style_no: '', description: '', color: '', sizes: {}, total_pieces: 0 }]);
-  const removePoItem = (id) => { if (poItems.length === 1) return; setPoItems(poItems.filter(i => i.id !== id)); };
-  const updatePoItem = (id, field, value) => setPoItems(poItems.map(i => i.id === id ? { ...i, [field]: value } : i));
+  const addPoColorRow = () => setPoColorRows([...poColorRows, { id: Date.now() + Math.random(), color: '', sizes: {}, cut_sizes: {} }]);
+  const removePoColorRow = (id) => { if (poColorRows.length === 1) return; setPoColorRows(poColorRows.filter(r => r.id !== id)); };
+  const updatePoColorName = (id, value) => setPoColorRows(poColorRows.map(r => r.id === id ? { ...r, color: value } : r));
+  const updatePoColorQty = (id, size, value) => {
+    setPoColorRows(poColorRows.map(r => r.id === id ? { ...r, sizes: { ...r.sizes, [size]: parseInt(value) || 0 } } : r));
+  };
 
-  const updatePoSizeQty = (itemId, sizeNum, subSize, value) => {
-    setPoItems(poItems.map(item => {
-      if (item.id !== itemId) return item;
-      const newSizes = { ...item.sizes };
-      if (!newSizes[sizeNum]) newSizes[sizeNum] = {};
-      newSizes[sizeNum][subSize] = parseInt(value) || 0;
-      let total = 0;
-      Object.values(newSizes).forEach(sn => Object.values(sn).forEach(qty => { total += qty; }));
-      return { ...item, sizes: newSizes, total_pieces: total };
+  const addPoSizeNumber = () => {
+    if (!newPoSizeNumber.trim()) return;
+    if (!poSizeNumbers.includes(newPoSizeNumber.trim())) setPoSizeNumbers([...poSizeNumbers, newPoSizeNumber.trim()]);
+    setNewPoSizeNumber('');
+  };
+  const removePoSizeNumber = (s) => setPoSizeNumbers(poSizeNumbers.filter(x => x !== s));
+
+  const getPoRowTotal = (row) => poSizeNumbers.reduce((sum, s) => sum + (row.sizes[s] || 0), 0);
+  const getPoGrandTotal = () => poColorRows.reduce((sum, r) => sum + getPoRowTotal(r), 0);
+  const getPoColumnTotal = (size) => poColorRows.reduce((sum, r) => sum + (r.sizes[size] || 0), 0);
+
+  const openCuttingPO = async (po) => {
+    try {
+      const res = await client.get(`/purchase-orders/${po.id}`);
+      const full = res.data;
+      setCuttingPoTarget(full);
+      const items = full.items || [];
+      setCuttingPoItem(items.map(i => ({
+        id: i.id,
+        color: i.color || '',
+        sizes: i.sizes || {},
+        cut_sizes: typeof i.cut_sizes === 'string' ? JSON.parse(i.cut_sizes) : (i.cut_sizes || {})
+      })));
+      setCuttingPoModalVisible(true);
+    } catch (err) { alert('Could not load PO'); }
+  };
+
+  const updateCuttingPoQty = (rowId, size, value) => {
+    setCuttingPoItem(cuttingPoItem.map(row => {
+      if (row.id !== rowId) return row;
+      return { ...row, cut_sizes: { ...row.cut_sizes, [size]: parseInt(value) || 0 } };
     }));
   };
 
-  const getPoSizeQty = (item, sizeNum, subSize) => {
-    if (!item.sizes || !item.sizes[sizeNum]) return '';
-    return item.sizes[sizeNum][subSize] ? String(item.sizes[sizeNum][subSize]) : '';
+  const saveCuttingPo = async () => {
+    try {
+      const items = cuttingPoItem.map(row => ({
+        style_no: cuttingPoTarget.items.find(i => i.id === row.id)?.style_no || cuttingPoTarget.article_name,
+        description: cuttingPoTarget.items.find(i => i.id === row.id)?.description || '',
+        color: row.color,
+        sizes: row.sizes,
+        total_pieces: Object.values(row.sizes).reduce((s, v) => s + (v || 0), 0),
+        cut_sizes: row.cut_sizes
+      }));
+      await client.put(`/purchase-orders/${cuttingPoTarget.id}`, {
+        po_number: cuttingPoTarget.po_number,
+        po_date: cuttingPoTarget.po_date ? cuttingPoTarget.po_date.toString().split('T')[0] : '',
+        party_id: cuttingPoTarget.party_id,
+        article_name: cuttingPoTarget.article_name,
+        fabric_details: cuttingPoTarget.fabric_details,
+        status: cuttingPoTarget.status,
+        notes: cuttingPoTarget.notes,
+        items
+      });
+      setCuttingPoModalVisible(false);
+      fetchAll();
+    } catch (err) { alert('Could not save cutting data'); }
   };
-
-  const getPoTotalPieces = () => poItems.reduce((sum, item) => sum + (item.total_pieces || 0), 0);
 
   const openEditPO = async (po) => {
     try {
       const res = await client.get(`/purchase-orders/${po.id}`);
       const full = res.data;
       setEditingPO(full);
+      const firstItem = (full.items && full.items[0]) || {};
       setPoForm({
         po_number: full.po_number || '',
         po_date: full.po_date ? full.po_date.toString().split('T')[0] : '',
-        article_name: full.article_name || '',
+        style_no: firstItem.style_no || full.article_name || '',
+        description: firstItem.description || '',
         fabric_details: full.fabric_details || '',
         status: full.status || 'Pending',
         notes: full.notes || ''
       });
       const poItemsData = full.items || [];
-      setPoItems(poItemsData.map(i => ({
-        id: i.id || Date.now(),
-        style_no: i.style_no || '',
-        description: i.description || '',
-        color: i.color || '',
-        sizes: i.sizes || {},
-        total_pieces: i.total_pieces || 0
-      })));
+      setPoColorRows(poItemsData.length > 0
+        ? poItemsData.map(i => ({
+            id: i.id || Date.now() + Math.random(),
+            color: i.color || '',
+            sizes: i.sizes || {},
+            cut_sizes: typeof i.cut_sizes === 'string' ? JSON.parse(i.cut_sizes) : (i.cut_sizes || {})
+          }))
+        : [{ id: Date.now(), color: '', sizes: {}, cut_sizes: {} }]
+      );
       const allSizeNums = new Set();
       poItemsData.forEach(i => { if (i.sizes) Object.keys(i.sizes).forEach(sn => allSizeNums.add(sn)); });
-      if (allSizeNums.size > 0) setPoSizeNumbers([...allSizeNums].sort());
+      setPoSizeNumbers(allSizeNums.size > 0 ? [...allSizeNums] : ['S', 'M', 'L', 'XL', 'XXL']);
       setPoModalVisible(true);
     } catch (err) { alert('Could not load PO'); }
   };
@@ -381,13 +430,25 @@ export default function PartyDetailScreen({ route }) {
 
   const savePO = async () => {
     if (!poForm.po_number || !poForm.po_date) { alert('PO number and date are required'); return; }
+    if (!poForm.style_no) { alert('Style number is required'); return; }
     try {
+      const items = poColorRows.filter(r => r.color.trim()).map(r => ({
+        style_no: poForm.style_no,
+        description: poForm.description,
+        color: r.color,
+        sizes: r.sizes,
+        total_pieces: getPoRowTotal(r),
+        cut_sizes: r.cut_sizes || {}
+      }));
       const payload = {
-        ...poForm, party_id: party.id,
-        items: poItems.map(i => ({
-          style_no: i.style_no, description: i.description,
-          color: i.color, sizes: i.sizes, total_pieces: i.total_pieces || 0
-        }))
+        po_number: poForm.po_number,
+        po_date: poForm.po_date,
+        party_id: party.id,
+        article_name: poForm.style_no,
+        fabric_details: poForm.fabric_details,
+        status: poForm.status,
+        notes: poForm.notes,
+        items
       };
       if (editingPO) {
         await client.put(`/purchase-orders/${editingPO.id}`, payload);
@@ -396,9 +457,9 @@ export default function PartyDetailScreen({ route }) {
       }
       setPoModalVisible(false);
       setEditingPO(null);
-      setPoForm({ po_number: '', po_date: '', article_name: '', fabric_details: '', status: 'Pending', notes: '' });
-      setPoItems([{ id: Date.now(), style_no: '', description: '', color: '', sizes: {}, total_pieces: 0 }]);
-      setPoSizeNumbers(['50', '52', '54']);
+      setPoForm({ po_number: '', po_date: '', style_no: '', description: '', fabric_details: '', status: 'Pending', notes: '' });
+      setPoColorRows([{ id: Date.now(), color: '', sizes: {}, cut_sizes: {} }]);
+      setPoSizeNumbers(['S', 'M', 'L', 'XL', 'XXL']);
       fetchAll();
     } catch (err) { alert('Could not save PO'); }
   };
@@ -414,51 +475,64 @@ export default function PartyDetailScreen({ route }) {
     try {
       const res = await client.get(`/purchase-orders/${po.id}`);
       const full = res.data;
-      const allSizeNums = new Set();
-      full.items.forEach(i => { if (i.sizes) Object.keys(i.sizes).forEach(sn => allSizeNums.add(sn)); });
-      const sizeNums = [...allSizeNums].sort((a, b) => parseInt(a) - parseInt(b));
-      let sizeHeaderRow1 = '';
-      let sizeHeaderRow2 = '';
-      sizeNums.forEach(sn => {
-        const activeSubs = SIZES.filter(ss => full.items.some(i => i.sizes && i.sizes[sn] && i.sizes[sn][ss]));
-        const cols = activeSubs.length > 0 ? activeSubs : ['S', 'M'];
-        sizeHeaderRow1 += `<th colspan="${cols.length}" style="text-align:center;border:1px solid #1e1b4b">${sn}</th>`;
-        cols.forEach(ss => { sizeHeaderRow2 += `<th style="text-align:center;border:1px solid #ddd">${ss}</th>`; });
-      });
-      const rows = full.items.map((item, idx) => {
-        let sizeCells = '';
-        sizeNums.forEach(sn => {
-          const activeSubs = SIZES.filter(ss => full.items.some(i => i.sizes && i.sizes[sn] && i.sizes[sn][ss]));
-          const cols = activeSubs.length > 0 ? activeSubs : ['S', 'M'];
-          cols.forEach(ss => {
-            const qty = item.sizes && item.sizes[sn] && item.sizes[sn][ss] ? item.sizes[sn][ss] : '-';
-            sizeCells += `<td style="text-align:center;border:1px solid #ddd">${qty}</td>`;
-          });
-        });
-        return `<tr><td style="border:1px solid #ddd">${idx + 1}</td><td style="border:1px solid #ddd">${item.style_no || '-'}</td><td style="border:1px solid #ddd">${item.description || '-'}</td><td style="border:1px solid #ddd">${item.color || '-'}</td>${sizeCells}<td style="text-align:center;font-weight:bold;border:1px solid #ddd">${item.total_pieces || 0}</td></tr>`;
+      const allSizes = new Set();
+      full.items.forEach(i => { if (i.sizes) Object.keys(i.sizes).forEach(s => allSizes.add(s)); });
+      const sizes = [...allSizes];
+      const rows = full.items.map(item => {
+        const cutSizes = typeof item.cut_sizes === 'string' ? JSON.parse(item.cut_sizes) : (item.cut_sizes || {});
+        const hasCutData = Object.values(cutSizes).some(v => v > 0);
+        const orderedCells = sizes.map(s => {
+          const qty = item.sizes && item.sizes[s] ? item.sizes[s] : '-';
+          return `<td style="text-align:center;border:1px solid #ddd">${qty}</td>`;
+        }).join('');
+        const cutTotal = sizes.reduce((sum, s) => sum + (cutSizes[s] || 0), 0);
+        const orderedRow = `<tr><td style="border:1px solid #ddd" rowspan="${hasCutData ? 2 : 1}">${item.color || '-'}</td><td style="border:1px solid #ddd;font-size:10px;color:#666">Ordered</td>${orderedCells}<td style="text-align:center;font-weight:bold;border:1px solid #ddd">${item.total_pieces || 0}</td></tr>`;
+        if (!hasCutData) return orderedRow;
+        const cutCells = sizes.map(s => {
+          const qty = cutSizes[s] || 0;
+          return `<td style="text-align:center;border:1px solid #ddd;background:#f0fdf4;color:#16a34a;font-weight:600">${qty}</td>`;
+        }).join('');
+        const cutRow = `<tr><td style="border:1px solid #ddd;font-size:10px;color:#16a34a">Cut</td>${cutCells}<td style="text-align:center;font-weight:bold;border:1px solid #ddd;background:#f0fdf4;color:#16a34a">${cutTotal}</td></tr>`;
+        return orderedRow + cutRow;
       }).join('');
+      const colTotals = sizes.map(s => {
+        const total = full.items.reduce((sum, item) => sum + (item.sizes && item.sizes[s] ? item.sizes[s] : 0), 0);
+        return `<td style="text-align:center;font-weight:bold;border:1px solid #ddd;background:#eef2ff">${total || '-'}</td>`;
+      }).join('');
+      const firstItem = full.items[0] || {};
       const win = window.open('', '_blank', 'width=900,height=700,left=100,top=100');
       win.document.write(`<!DOCTYPE html><html><head><title>PO — ${full.po_number}</title>
-        <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:24px;font-size:12px}.info{margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:4px 40px}.info-row{font-size:13px}.info-row span{font-weight:bold}h2{color:#1e1b4b;margin-bottom:12px;font-size:16px}table{width:100%;border-collapse:collapse;margin-top:8px}th{background:#1e1b4b;color:#fff;padding:6px 8px;font-size:11px;border:1px solid #1e1b4b}td{padding:6px 8px;font-size:11px;border:1px solid #ddd}tr:nth-child(even){background:#f9fafb}.total-row{margin-top:12px;text-align:right;font-size:14px;font-weight:bold;color:#1e1b4b}</style></head>
+        <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+        <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:24px;font-size:12px}.header{display:flex;align-items:center;gap:10px;margin-bottom:16px}.logo{width:40px;height:40px;object-fit:contain;background:#000;border-radius:4px;padding:2px}.header h2{font-size:18px;color:#1e1b4b}.info{margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:4px 40px}.info-row{font-size:13px}.info-row span{font-weight:bold}table{width:100%;border-collapse:collapse;margin-top:8px}th{background:#1e1b4b;color:#fff;padding:8px;font-size:12px;border:1px solid #1e1b4b}td{padding:6px 8px;font-size:11px;border:1px solid #ddd}.total-row{margin-top:12px;text-align:right;font-size:14px;font-weight:bold;color:#1e1b4b}.notes{margin-top:8px;font-size:12px;color:#666;font-style:italic}.legend{margin-top:6px;font-size:11px;color:#666}</style></head>
         <body>
-          <img src="https://res.cloudinary.com/dx1us5oiy/image/upload/Screenshot_2026-06-23_103649_hgb6dl.png" style="..."/> RS APPARELS</h2> — Purchase Order</h2>
+          <div class="header"><img class="logo" src="https://res.cloudinary.com/dx1us5oiy/image/upload/Screenshot_2026-06-23_103649_hgb6dl.png" crossorigin="anonymous"/><h2>RS APPARELS — Purchase Order</h2></div>
           <div class="info">
             <div class="info-row">PO Number: <span>${full.po_number}</span></div>
             <div class="info-row">PO Date: <span>${full.po_date ? full.po_date.toString().split('T')[0] : '-'}</span></div>
             <div class="info-row">Party: <span>${party.name}</span></div>
             <div class="info-row">Status: <span>${full.status}</span></div>
-            <div class="info-row">Article: <span>${full.article_name || '-'}</span></div>
+            <div class="info-row">Style No: <span>${firstItem.style_no || full.article_name || '-'}</span></div>
+            <div class="info-row">Description: <span>${firstItem.description || '-'}</span></div>
             <div class="info-row">Fabric: <span>${full.fabric_details || '-'}</span></div>
           </div>
-          <table><thead><tr><th rowspan="2">Sr#</th><th rowspan="2">Style</th><th rowspan="2">Item</th><th rowspan="2">Colours</th>${sizeHeaderRow1}<th rowspan="2" style="text-align:center">Total<br/>Pcs</th></tr><tr>${sizeHeaderRow2}</tr></thead>
-          <tbody>${rows}</tbody></table>
+          <table>
+            <thead><tr><th>Color</th><th></th>${sizes.map(s => `<th>${s}</th>`).join('')}<th>Total</th></tr></thead>
+            <tbody>${rows}<tr><td colspan="2" style="font-weight:bold;background:#f3f4f6">Total Ordered</td>${colTotals}<td style="text-align:center;font-weight:bold;border:1px solid #ddd;background:#1e1b4b;color:#fff">${full.total_pieces || 0}</td></tr><tr><td colspan="2" style="font-weight:bold;background:#f0fdf4;color:#166534">Total Cut</td>${sizes.map(s => { const t = full.items.reduce((sum, item) => { const cs = typeof item.cut_sizes === 'string' ? JSON.parse(item.cut_sizes) : (item.cut_sizes || {}); return sum + (cs[s] || 0); }, 0); return `<td style="text-align:center;font-weight:bold;border:1px solid #ddd;background:#f0fdf4;color:#16a34a">${t || '-'}</td>`; }).join('')}<td style="text-align:center;font-weight:bold;border:1px solid #ddd;background:#166534;color:#fff">${full.items.reduce((sum, item) => { const cs = typeof item.cut_sizes === 'string' ? JSON.parse(item.cut_sizes) : (item.cut_sizes || {}); return sum + Object.values(cs).reduce((s, v) => s + (v || 0), 0); }, 0)}</td></tr></tbody>
+          </table>
+          <div class="legend">Green rows show actual cut quantities (where recorded)</div>
           <div class="total-row">Total Pieces: ${full.total_pieces || 0}</div>
-          ${full.notes ? `<div style="margin-top:8px;font-size:12px;color:#666">Notes: ${full.notes}</div>` : ''}
+          ${full.notes ? `<div class="notes">Notes: ${full.notes}</div>` : ''}
+          <script>
+            window.onload = function() {
+              setTimeout(function() {
+                window.print();
+                setTimeout(function() { window.close(); }, 500);
+              }, 500);
+            };
+          </script>
         </body></html>`);
       win.document.close();
-    win.print();
-    win.onafterprint = () => win.close();
-    setTimeout(() => window.focus(), 100); win.print();
+      window.focus();
     } catch (err) { alert('Could not print PO'); }
   };
 
@@ -1002,9 +1076,9 @@ const saveInvoice = async () => {
         {activeTab === 'PO' && (
           <TouchableOpacity style={styles.addBtn} onPress={() => {
             setEditingPO(null);
-            setPoForm({ po_number: '', po_date: '', article_name: '', fabric_details: '', status: 'Pending', notes: '' });
-            setPoItems([{ id: Date.now(), style_no: '', description: '', color: '', sizes: {}, total_pieces: 0 }]);
-            setPoSizeNumbers(['50', '52', '54']);
+            setPoForm({ po_number: '', po_date: '', style_no: '', description: '', fabric_details: '', status: 'Pending', notes: '' });
+            setPoColorRows([{ id: Date.now(), color: '', sizes: {}, cut_sizes: {} }]);
+            setPoSizeNumbers(['S', 'M', 'L', 'XL', 'XXL']);
             setPoModalVisible(true);
           }}>
             <Text style={styles.addBtnText}>+ New PO</Text>
@@ -1332,6 +1406,9 @@ const saveInvoice = async () => {
                         </TouchableOpacity>
                         <TouchableOpacity style={styles.printBtn} onPress={() => openEditPO(po)}>
                           <Text style={styles.printBtnText}>✏️</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.printBtn} onPress={() => openCuttingPO(po)}>
+                          <Text style={styles.printBtnText}>✂️</Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={styles.printBtn} onPress={() => printPO(po)}>
                           <Text style={styles.printBtnText}>🖨️</Text>
@@ -2094,123 +2171,215 @@ const saveInvoice = async () => {
       <Modal visible={poModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, isDesktop && styles.modalDesktop]}>
-            <Text style={styles.modalTitle}>{editingPO ? '✏️ Edit PO' : '📋 New Purchase Order'} — {party.name}</Text>
+            <Text style={styles.modalTitle}>{editingPO ? 'Edit Purchase Order' : 'New Purchase Order'}</Text>
             <ScrollView>
-              <TextInput style={styles.input} placeholder="PO Number * (e.g. PO-001)"
-                value={poForm.po_number} onChangeText={(v) => setPoForm({ ...poForm, po_number: v })} />
-              <DatePicker label="PO Date *" value={poForm.po_date}
-                onChange={(v) => setPoForm({ ...poForm, po_date: v })} />
-              <TextInput style={styles.input} placeholder="Article name"
-                value={poForm.article_name} onChangeText={(v) => setPoForm({ ...poForm, article_name: v })} />
-              <TextInput style={styles.input} placeholder="Fabric details"
-                value={poForm.fabric_details} onChangeText={(v) => setPoForm({ ...poForm, fabric_details: v })} />
-              <Text style={styles.label}>Status</Text>
-              <View style={styles.typeRow}>
-                {['Pending', 'In Progress', 'Completed'].map(s => (
-                  <TouchableOpacity key={s}
-                    style={[styles.typeBtn, poForm.status === s && styles.typeBtnActive]}
-                    onPress={() => setPoForm({ ...poForm, status: s })}>
-                    <Text style={[styles.typeBtnText, poForm.status === s && styles.typeBtnTextActive]}>{s}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <Text style={styles.label}>Size Numbers</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-                {poSizeNumbers.map(sn => (
-                  <View key={sn} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#eef2ff', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, gap: 6 }}>
-                    <Text style={{ fontSize: 13, color: '#4361ee', fontWeight: '600' }}>{sn}</Text>
-                    <TouchableOpacity onPress={() => setPoSizeNumbers(poSizeNumbers.filter(s => s !== sn))}>
-                      <Text style={{ fontSize: 12, color: '#ef4444', fontWeight: 'bold' }}>✕</Text>
+              <View style={isDesktop ? { flexDirection: 'row', gap: 16, alignItems: 'flex-start' } : {}}>
+
+                <View style={isDesktop ? { flex: 1 } : {}}>
+
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TextInput style={[styles.input, { flex: 1 }]} placeholder="PO Number * (e.g. PO-001)"
+                      value={poForm.po_number} onChangeText={(v) => setPoForm({ ...poForm, po_number: v })} />
+                    <View style={{ flex: 1 }}>
+                      <DatePicker label="" value={poForm.po_date}
+                        onChange={(v) => setPoForm({ ...poForm, po_date: v })} />
+                    </View>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TextInput style={[styles.input, { flex: 1 }]} placeholder="Style No * (e.g. ASM-265)"
+                      value={poForm.style_no} onChangeText={(v) => setPoForm({ ...poForm, style_no: v })} />
+                    <TextInput style={[styles.input, { flex: 1 }]} placeholder="Description"
+                      value={poForm.description} onChangeText={(v) => setPoForm({ ...poForm, description: v })} />
+                  </View>
+                  <TextInput style={styles.input} placeholder="Fabric details"
+                    value={poForm.fabric_details} onChangeText={(v) => setPoForm({ ...poForm, fabric_details: v })} />
+
+                  <Text style={styles.label}>Status</Text>
+                  <View style={styles.typeRow}>
+                    {['Pending', 'In Progress', 'Completed'].map(s => (
+                      <TouchableOpacity key={s}
+                        style={[styles.typeBtn, poForm.status === s && styles.typeBtnActive]}
+                        onPress={() => setPoForm({ ...poForm, status: s })}>
+                        <Text style={[styles.typeBtnText, poForm.status === s && styles.typeBtnTextActive]}>{s}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text style={[styles.label, { marginTop: 8 }]}>Sizes</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                    {poSizeNumbers.map(s => (
+                      <View key={s} style={styles.sizeNumberTag}>
+                        <Text style={styles.sizeNumberText}>{s}</Text>
+                        <TouchableOpacity onPress={() => removePoSizeNumber(s)}>
+                          <Text style={styles.sizeNumberRemove}>✕</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10, alignItems: 'center' }}>
+                    <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                      placeholder="Add size (e.g. XXXL or 52)"
+                      value={newPoSizeNumber} onChangeText={setNewPoSizeNumber} />
+                    <TouchableOpacity style={styles.addCategoryBtn} onPress={addPoSizeNumber}>
+                      <Text style={styles.addCategoryBtnText}>+ Add</Text>
                     </TouchableOpacity>
                   </View>
-                ))}
-              </View>
-              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12, alignItems: 'center' }}>
-                <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]}
-                  placeholder="Add size number (e.g. 56)"
-                  value={newPoSizeNumber} onChangeText={setNewPoSizeNumber} keyboardType="numeric" />
-                <TouchableOpacity style={styles.addCategoryBtn}
-                  onPress={() => {
-                    if (!newPoSizeNumber.trim()) return;
-                    if (!poSizeNumbers.includes(newPoSizeNumber.trim())) setPoSizeNumbers([...poSizeNumbers, newPoSizeNumber.trim()]);
-                    setNewPoSizeNumber('');
-                  }}>
-                  <Text style={styles.addCategoryBtnText}>+ Add</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.label}>Items</Text>
-              {poItems.map((item, itemIdx) => (
-                <View key={item.id} style={{ backgroundColor: '#f8faff', borderRadius: 10, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#e0e7ff' }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#1e1b4b' }}>Item {itemIdx + 1}</Text>
-                    {poItems.length > 1 && (
-                      <TouchableOpacity onPress={() => removePoItem(item.id)}>
-                        <Text style={{ color: '#ef4444', fontSize: 13 }}>Remove</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                  <TextInput style={styles.input} placeholder="Style No"
-                    value={item.style_no} onChangeText={(v) => updatePoItem(item.id, 'style_no', v)} />
-                  <TextInput style={styles.input} placeholder="Description"
-                    value={item.description} onChangeText={(v) => updatePoItem(item.id, 'description', v)} />
-                  <TextInput style={styles.input} placeholder="Color"
-                    value={item.color} onChangeText={(v) => updatePoItem(item.id, 'color', v)} />
-                  <Text style={styles.label}>Quantities by Size</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-                    <View>
-                      <View style={{ flexDirection: 'row' }}>
-                        <View style={{ width: 44, padding: 4, backgroundColor: '#1e1b4b', justifyContent: 'center', alignItems: 'center' }}>
-                          <Text style={{ fontSize: 10, fontWeight: '600', color: '#fff' }}>Size</Text>
-                        </View>
-                        {SIZES.map(ss => (
-                          <View key={ss} style={{ width: 48, padding: 2, backgroundColor: '#2d2a6e', alignItems: 'center', justifyContent: 'center', minHeight: 32 }}>
-                            <Text style={{ fontSize: 10, fontWeight: '600', color: '#fff' }}>{ss}</Text>
+
+                  <Text style={[styles.label, { marginTop: 8 }]}>Quantities by Color & Size</Text>
+                  <View style={styles.colorGridBox}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                      <View>
+                        <View style={styles.gridRow}>
+                          <View style={[styles.gridColorCell, { backgroundColor: '#1e1b4b' }]}>
+                            <Text style={styles.gridHeaderText}>Color</Text>
                           </View>
-                        ))}
-                        <View style={{ width: 52, padding: 4, backgroundColor: '#eef2ff', alignItems: 'center' }}>
-                          <Text style={{ fontSize: 10, fontWeight: '600', color: '#4361ee' }}>Total</Text>
-                        </View>
-                      </View>
-                      {poSizeNumbers.map(sn => {
-                        const rowTotal = SIZES.reduce((sum, ss) =>
-                          sum + (item.sizes && item.sizes[sn] && item.sizes[sn][ss] ? item.sizes[sn][ss] : 0), 0);
-                        return (
-                          <View key={sn} style={{ flexDirection: 'row' }}>
-                            <View style={{ width: 44, padding: 4, backgroundColor: '#1e1b4b', justifyContent: 'center', alignItems: 'center' }}>
-                              <Text style={{ fontSize: 11, fontWeight: '600', color: '#fff' }}>{sn}</Text>
+                          {poSizeNumbers.map(ss => (
+                            <View key={ss} style={[styles.gridCell, { backgroundColor: '#2d2a6e' }]}>
+                              <Text style={styles.gridHeaderText}>{ss}</Text>
                             </View>
-                            {SIZES.map(ss => (
-                              <View key={ss} style={{ width: 48, padding: 2, alignItems: 'center', justifyContent: 'center' }}>
+                          ))}
+                          <View style={styles.gridTotalCell}>
+                            <Text style={styles.gridTotalHeader}>Total</Text>
+                          </View>
+                          <View style={{ width: 30 }} />
+                        </View>
+                        {poColorRows.map((row) => (
+                          <View key={row.id} style={styles.gridRow}>
+                            <View style={styles.gridColorInputCell}>
+                              <TextInput
+                                style={styles.gridColorInput}
+                                value={row.color}
+                                onChangeText={(v) => updatePoColorName(row.id, v)}
+                                placeholder="Color"
+                              />
+                            </View>
+                            {poSizeNumbers.map(ss => (
+                              <View key={ss} style={styles.gridCell}>
                                 <TextInput
-                                  style={{ borderWidth: 1, borderColor: '#ddd', borderRadius: 4, padding: 3, fontSize: 11, textAlign: 'center', width: 44, backgroundColor: '#fff' }}
-                                  value={getPoSizeQty(item, sn, ss)}
-                                  onChangeText={(v) => updatePoSizeQty(item.id, sn, ss, v)}
-                                  keyboardType="numeric" placeholder="0"
+                                  style={styles.gridInput}
+                                  value={row.sizes[ss] ? String(row.sizes[ss]) : ''}
+                                  onChangeText={(v) => updatePoColorQty(row.id, ss, v)}
+                                  keyboardType="numeric"
+                                  placeholder="0"
                                 />
                               </View>
                             ))}
-                            <View style={{ width: 52, padding: 4, backgroundColor: '#eef2ff', alignItems: 'center', justifyContent: 'center' }}>
-                              <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#4361ee' }}>{rowTotal}</Text>
+                            <View style={styles.gridTotalCell}>
+                              <Text style={styles.gridTotalText}>{getPoRowTotal(row)}</Text>
                             </View>
+                            <TouchableOpacity style={{ width: 30, alignItems: 'center' }} onPress={() => removePoColorRow(row.id)}>
+                              <Text style={{ color: '#ef4444', fontSize: 14 }}>🗑️</Text>
+                            </TouchableOpacity>
                           </View>
-                        );
-                      })}
+                        ))}
+                        <View style={styles.gridRow}>
+                          <View style={[styles.gridColorCell, { backgroundColor: '#f3f4f6' }]}>
+                            <Text style={[styles.gridLabelText, { color: '#374151' }]}>Total</Text>
+                          </View>
+                          {poSizeNumbers.map(ss => (
+                            <View key={ss} style={[styles.gridCell, { backgroundColor: '#eef2ff' }]}>
+                              <Text style={styles.gridTotalText}>{getPoColumnTotal(ss) || '-'}</Text>
+                            </View>
+                          ))}
+                          <View style={[styles.gridTotalCell, { backgroundColor: '#1e1b4b' }]}>
+                            <Text style={[styles.gridTotalText, { color: '#fff' }]}>{getPoGrandTotal()}</Text>
+                          </View>
+                          <View style={{ width: 30 }} />
+                        </View>
+                      </View>
+                    </ScrollView>
+                  </View>
+                  <TouchableOpacity style={styles.addColorBtn} onPress={addPoColorRow}>
+                    <Text style={styles.addColorBtnText}>+ Add Color</Text>
+                  </TouchableOpacity>
+
+                  <TextInput style={styles.input} placeholder="Notes"
+                    value={poForm.notes} onChangeText={(v) => setPoForm({ ...poForm, notes: v })} />
+
+                  {!isDesktop && (
+                    <View style={styles.poPreviewBox}>
+                      <View style={styles.poPreviewHeader}>
+                        <View style={styles.poPreviewLogo}><Text style={{ color: '#d4af37', fontSize: 10, fontWeight: 'bold' }}>RS</Text></View>
+                        <Text style={styles.poPreviewTitle}>RS APPARELS — Purchase Order</Text>
+                      </View>
+                      <View style={styles.poPreviewInfo}>
+                        <Text style={styles.poPreviewInfoText}>PO: <Text style={styles.poPreviewInfoBold}>{poForm.po_number || '—'}</Text></Text>
+                        <Text style={styles.poPreviewInfoText}>Date: <Text style={styles.poPreviewInfoBold}>{poForm.po_date ? poForm.po_date.split('-').reverse().join('/') : '—'}</Text></Text>
+                        <Text style={styles.poPreviewInfoText}>Party: <Text style={styles.poPreviewInfoBold}>{party.name}</Text></Text>
+                        <Text style={styles.poPreviewInfoText}>Style: <Text style={styles.poPreviewInfoBold}>{poForm.style_no || '—'}</Text></Text>
+                      </View>
+                      <View style={styles.poPreviewTable}>
+                        <View style={styles.poPreviewTableHeader}>
+                          <Text style={[styles.poPreviewTh, { flex: 1.2 }]}>Color</Text>
+                          {poSizeNumbers.map(s => <Text key={s} style={[styles.poPreviewTh, { flex: 0.7, textAlign: 'center' }]}>{s}</Text>)}
+                          <Text style={[styles.poPreviewTh, { flex: 0.8, textAlign: 'center' }]}>Tot</Text>
+                        </View>
+                        {poColorRows.filter(r => r.color).map((row, i) => (
+                          <View key={row.id} style={[styles.poPreviewTableRow, i % 2 === 0 && { backgroundColor: '#f9fafb' }]}>
+                            <Text style={[styles.poPreviewTd, { flex: 1.2 }]}>{row.color}</Text>
+                            {poSizeNumbers.map(s => <Text key={s} style={[styles.poPreviewTd, { flex: 0.7, textAlign: 'center' }]}>{row.sizes[s] || '-'}</Text>)}
+                            <Text style={[styles.poPreviewTd, { flex: 0.8, textAlign: 'center', color: '#4361ee', fontWeight: '600' }]}>{getPoRowTotal(row)}</Text>
+                          </View>
+                        ))}
+                      </View>
+                      <View style={styles.poPreviewTotalBox}>
+                        <Text style={styles.poPreviewTotalLabel}>TOTAL PIECES</Text>
+                        <Text style={styles.poPreviewTotalValue}>{getPoGrandTotal()}</Text>
+                      </View>
                     </View>
-                  </ScrollView>
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#4361ee', marginTop: 8, textAlign: 'right' }}>
-                    Total pieces: {item.total_pieces || 0}
-                  </Text>
+                  )}
+
                 </View>
-              ))}
-              <TouchableOpacity style={{ backgroundColor: '#eef2ff', borderRadius: 8, padding: 12, alignItems: 'center', marginBottom: 12, borderWidth: 1, borderColor: '#4361ee' }}
-                onPress={addPoItem}>
-                <Text style={{ color: '#4361ee', fontWeight: '600', fontSize: 13 }}>+ Add Another Color/Item</Text>
-              </TouchableOpacity>
-              <View style={{ backgroundColor: '#1e1b4b', borderRadius: 8, padding: 12, marginBottom: 12, alignItems: 'center' }}>
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Grand Total: {getPoTotalPieces()} pieces</Text>
+
+                {isDesktop && (
+                  <View style={{ width: 380 }}>
+                    <View style={styles.invLiveBadge}>
+                      <View style={styles.invLiveDot} />
+                      <Text style={{ fontSize: 10, color: '#16a34a' }}>Live preview</Text>
+                    </View>
+                    <View style={styles.poPreviewBox}>
+                      <View style={styles.poPreviewHeader}>
+                        <View style={styles.poPreviewLogo}><Text style={{ color: '#d4af37', fontSize: 10, fontWeight: 'bold' }}>RS</Text></View>
+                        <Text style={styles.poPreviewTitle}>RS APPARELS — Purchase Order</Text>
+                      </View>
+                      <View style={styles.poPreviewInfo}>
+                        <Text style={styles.poPreviewInfoText}>PO: <Text style={styles.poPreviewInfoBold}>{poForm.po_number || '—'}</Text></Text>
+                        <Text style={styles.poPreviewInfoText}>Date: <Text style={styles.poPreviewInfoBold}>{poForm.po_date ? poForm.po_date.split('-').reverse().join('/') : '—'}</Text></Text>
+                        <Text style={styles.poPreviewInfoText}>Party: <Text style={styles.poPreviewInfoBold}>{party.name}</Text></Text>
+                        <Text style={styles.poPreviewInfoText}>Style: <Text style={styles.poPreviewInfoBold}>{poForm.style_no || '—'}</Text></Text>
+                        <Text style={styles.poPreviewInfoText}>Desc: <Text style={styles.poPreviewInfoBold}>{poForm.description || '—'}</Text></Text>
+                        <Text style={styles.poPreviewInfoText}>Fabric: <Text style={styles.poPreviewInfoBold}>{poForm.fabric_details || '—'}</Text></Text>
+                      </View>
+                      <View style={styles.poPreviewTable}>
+                        <View style={styles.poPreviewTableHeader}>
+                          <Text style={[styles.poPreviewTh, { flex: 1.2 }]}>Color</Text>
+                          {poSizeNumbers.map(s => <Text key={s} style={[styles.poPreviewTh, { flex: 0.7, textAlign: 'center' }]}>{s}</Text>)}
+                          <Text style={[styles.poPreviewTh, { flex: 0.8, textAlign: 'center' }]}>Tot</Text>
+                        </View>
+                        {poColorRows.filter(r => r.color).length === 0
+                          ? <Text style={{ textAlign: 'center', color: '#888', fontSize: 11, padding: 10 }}>No colors added yet</Text>
+                          : poColorRows.filter(r => r.color).map((row, i) => (
+                            <View key={row.id} style={[styles.poPreviewTableRow, i % 2 === 0 && { backgroundColor: '#f9fafb' }]}>
+                              <Text style={[styles.poPreviewTd, { flex: 1.2 }]}>{row.color}</Text>
+                              {poSizeNumbers.map(s => <Text key={s} style={[styles.poPreviewTd, { flex: 0.7, textAlign: 'center' }]}>{row.sizes[s] || '-'}</Text>)}
+                              <Text style={[styles.poPreviewTd, { flex: 0.8, textAlign: 'center', color: '#4361ee', fontWeight: '600' }]}>{getPoRowTotal(row)}</Text>
+                            </View>
+                          ))
+                        }
+                      </View>
+                      <View style={styles.poPreviewTotalBox}>
+                        <Text style={styles.poPreviewTotalLabel}>TOTAL PIECES</Text>
+                        <Text style={styles.poPreviewTotalValue}>{getPoGrandTotal()}</Text>
+                      </View>
+                      {poForm.notes ? (
+                        <Text style={{ fontSize: 10, color: '#888', padding: 8, borderTopWidth: 0.5, borderTopColor: '#e5e7eb' }}>{poForm.notes}</Text>
+                      ) : null}
+                    </View>
+                  </View>
+                )}
+
               </View>
-              <TextInput style={styles.input} placeholder="Notes"
-                value={poForm.notes} onChangeText={(v) => setPoForm({ ...poForm, notes: v })} />
             </ScrollView>
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => { setPoModalVisible(false); setEditingPO(null); }}>
@@ -2218,6 +2387,108 @@ const saveInvoice = async () => {
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveBtn} onPress={savePO}>
                 <Text style={styles.saveText}>{editingPO ? 'Update PO' : 'Save PO'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* CUTTING PO MODAL */}
+      <Modal visible={cuttingPoModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, isDesktop && styles.modalDesktop]}>
+            <Text style={styles.modalTitle}>✂️ Cutting Status — {cuttingPoTarget?.po_number}</Text>
+            <Text style={styles.modalSub}>Compare ordered quantities with actual cut quantities</Text>
+            <ScrollView>
+              {cuttingPoItem && cuttingPoItem.map((row) => {
+                const rowSizes = Object.keys(row.sizes);
+                const orderedTotal = rowSizes.reduce((s, sz) => s + (row.sizes[sz] || 0), 0);
+                const cutTotal = rowSizes.reduce((s, sz) => s + (row.cut_sizes[sz] || 0), 0);
+                return (
+                  <View key={row.id} style={styles.cuttingColorBox}>
+                    <View style={styles.cuttingColorHeader}>
+                      <Text style={styles.cuttingColorName}>{row.color}</Text>
+                      <Text style={[styles.cuttingColorDiff, cutTotal >= orderedTotal ? { color: '#16a34a' } : { color: '#ef4444' }]}>
+                        {cutTotal} / {orderedTotal} cut
+                      </Text>
+                    </View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                      <View>
+                        <View style={styles.gridRow}>
+                          <View style={[styles.gridColorCell, { backgroundColor: '#1e1b4b', width: 70 }]}>
+                            <Text style={styles.gridHeaderText}>Size</Text>
+                          </View>
+                          {rowSizes.map(ss => (
+                            <View key={ss} style={[styles.gridCell, { backgroundColor: '#2d2a6e' }]}>
+                              <Text style={styles.gridHeaderText}>{ss}</Text>
+                            </View>
+                          ))}
+                        </View>
+                        <View style={styles.gridRow}>
+                          <View style={[styles.gridColorCell, { backgroundColor: '#eef2ff', width: 70 }]}>
+                            <Text style={[styles.gridLabelText, { color: '#4361ee' }]}>Ordered</Text>
+                          </View>
+                          {rowSizes.map(ss => (
+                            <View key={ss} style={styles.gridCell}>
+                              <Text style={styles.gridValueText}>{row.sizes[ss] || 0}</Text>
+                            </View>
+                          ))}
+                        </View>
+                        <View style={styles.gridRow}>
+                          <View style={[styles.gridColorCell, { backgroundColor: '#f0fdf4', width: 70 }]}>
+                            <Text style={[styles.gridLabelText, { color: '#16a34a' }]}>Cut</Text>
+                          </View>
+                          {rowSizes.map(ss => (
+                            <View key={ss} style={styles.gridCell}>
+                              <TextInput
+                                style={styles.gridInput}
+                                value={row.cut_sizes[ss] ? String(row.cut_sizes[ss]) : ''}
+                                onChangeText={(v) => updateCuttingPoQty(row.id, ss, v)}
+                                keyboardType="numeric"
+                                placeholder="0"
+                              />
+                            </View>
+                          ))}
+                        </View>
+                        <View style={styles.gridRow}>
+                          <View style={[styles.gridColorCell, { backgroundColor: '#fef3c7', width: 70 }]}>
+                            <Text style={[styles.gridLabelText, { color: '#92400e' }]}>Remain</Text>
+                          </View>
+                          {rowSizes.map(ss => {
+                            const remain = (row.sizes[ss] || 0) - (row.cut_sizes[ss] || 0);
+                            return (
+                              <View key={ss} style={styles.gridCell}>
+                                <Text style={[styles.gridValueText, { color: remain > 0 ? '#ef4444' : '#16a34a' }]}>{remain}</Text>
+                              </View>
+                            );
+                          })}
+                        </View>
+                        <View style={styles.gridRow}>
+                          <View style={[styles.gridColorCell, { backgroundColor: '#1e1b4b', width: 70 }]}>
+                            <Text style={styles.gridHeaderText}>Total</Text>
+                          </View>
+                          {rowSizes.map(ss => (
+                            <View key={ss} style={[styles.gridCell, { backgroundColor: '#eef2ff' }]}>
+                              <Text style={styles.gridTotalText}>{row.sizes[ss] || 0}/{row.cut_sizes[ss] || 0}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    </ScrollView>
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 6, gap: 12 }}>
+                      <Text style={{ fontSize: 12, color: '#4361ee', fontWeight: '600' }}>Ordered: {orderedTotal}</Text>
+                      <Text style={{ fontSize: 12, color: '#16a34a', fontWeight: '600' }}>Cut: {cutTotal}</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </ScrollView>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setCuttingPoModalVisible(false)}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.saveBtn} onPress={saveCuttingPo}>
+                <Text style={styles.saveText}>Save Cutting Status</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2256,57 +2527,63 @@ const saveInvoice = async () => {
                       <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#4361ee' }}>{viewPO.total_pieces}</Text>
                     </View>
                   </View>
-                  {viewPO.items && viewPO.items.map((item, idx) => {
-                    const allSizeNums = item.sizes ? Object.keys(item.sizes).sort((a, b) => parseInt(a) - parseInt(b)) : [];
+                  {viewPO.items && viewPO.items.length > 0 && (() => {
+                    const allSizes = new Set();
+                    viewPO.items.forEach(i => { if (i.sizes) Object.keys(i.sizes).forEach(s => allSizes.add(s)); });
+                    const vSizes = [...allSizes];
                     return (
-                      <View key={idx} style={{ backgroundColor: '#f8faff', borderRadius: 8, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#e0e7ff' }}>
-                        <Text style={{ fontSize: 13, fontWeight: '600', color: '#1e1b4b', marginBottom: 8 }}>
-                          {item.style_no} — {item.description} — {item.color}
-                        </Text>
+                      <View style={{ marginBottom: 10 }}>
                         <ScrollView horizontal showsHorizontalScrollIndicator={true}>
                           <View>
-                            <View style={{ flexDirection: 'row' }}>
-                              <View style={{ width: 44, padding: 4, backgroundColor: '#1e1b4b', justifyContent: 'center', alignItems: 'center' }}>
-                                <Text style={{ fontSize: 10, fontWeight: '600', color: '#fff' }}>Size</Text>
+                            <View style={styles.gridRow}>
+                              <View style={[styles.gridColorCell, { backgroundColor: '#1e1b4b' }]}>
+                                <Text style={styles.gridHeaderText}>Color</Text>
                               </View>
-                              {SIZES.map(ss => (
-                                <View key={ss} style={{ width: 48, padding: 2, backgroundColor: '#2d2a6e', alignItems: 'center', justifyContent: 'center', minHeight: 32 }}>
-                                  <Text style={{ fontSize: 10, fontWeight: '600', color: '#fff' }}>{ss}</Text>
+                              {vSizes.map(ss => (
+                                <View key={ss} style={[styles.gridCell, { backgroundColor: '#2d2a6e' }]}>
+                                  <Text style={styles.gridHeaderText}>{ss}</Text>
                                 </View>
                               ))}
-                              <View style={{ width: 52, padding: 4, backgroundColor: '#eef2ff', alignItems: 'center' }}>
-                                <Text style={{ fontSize: 10, fontWeight: '600', color: '#4361ee' }}>Total</Text>
+                              <View style={styles.gridTotalCell}>
+                                <Text style={styles.gridTotalHeader}>Total</Text>
                               </View>
                             </View>
-                            {allSizeNums.map(sn => {
-                              const rowTotal = SIZES.reduce((sum, ss) =>
-                                sum + (item.sizes[sn] && item.sizes[sn][ss] ? item.sizes[sn][ss] : 0), 0);
-                              return (
-                                <View key={sn} style={{ flexDirection: 'row' }}>
-                                  <View style={{ width: 44, padding: 4, backgroundColor: '#1e1b4b', justifyContent: 'center', alignItems: 'center' }}>
-                                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#fff' }}>{sn}</Text>
-                                  </View>
-                                  {SIZES.map(ss => (
-                                    <View key={ss} style={{ width: 48, padding: 6, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' }}>
-                                      <Text style={{ fontSize: 13, color: '#374151' }}>
-                                        {item.sizes[sn] && item.sizes[sn][ss] ? item.sizes[sn][ss] : '-'}
-                                      </Text>
-                                    </View>
-                                  ))}
-                                  <View style={{ width: 52, padding: 6, backgroundColor: '#eef2ff', alignItems: 'center', justifyContent: 'center' }}>
-                                    <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#4361ee' }}>{rowTotal}</Text>
-                                  </View>
+                            {viewPO.items.map((item, idx) => (
+                              <View key={idx} style={styles.gridRow}>
+                                <View style={styles.gridColorCell}>
+                                  <Text style={styles.gridValueText}>{item.color || '-'}</Text>
                                 </View>
-                              );
-                            })}
+                                {vSizes.map(ss => (
+                                  <View key={ss} style={styles.gridCell}>
+                                    <Text style={styles.gridValueText}>{item.sizes && item.sizes[ss] ? item.sizes[ss] : '-'}</Text>
+                                  </View>
+                                ))}
+                                <View style={styles.gridTotalCell}>
+                                  <Text style={styles.gridTotalText}>{item.total_pieces || 0}</Text>
+                                </View>
+                              </View>
+                            ))}
+                            <View style={styles.gridRow}>
+                              <View style={[styles.gridColorCell, { backgroundColor: '#f3f4f6' }]}>
+                                <Text style={[styles.gridLabelText, { color: '#374151' }]}>Total</Text>
+                              </View>
+                              {vSizes.map(ss => {
+                                const colTotal = viewPO.items.reduce((sum, item) => sum + (item.sizes && item.sizes[ss] ? item.sizes[ss] : 0), 0);
+                                return (
+                                  <View key={ss} style={[styles.gridCell, { backgroundColor: '#eef2ff' }]}>
+                                    <Text style={styles.gridTotalText}>{colTotal || '-'}</Text>
+                                  </View>
+                                );
+                              })}
+                              <View style={[styles.gridTotalCell, { backgroundColor: '#1e1b4b' }]}>
+                                <Text style={[styles.gridTotalText, { color: '#fff' }]}>{viewPO.total_pieces || 0}</Text>
+                              </View>
+                            </View>
                           </View>
                         </ScrollView>
-                        <Text style={{ fontSize: 13, fontWeight: '600', color: '#4361ee', marginTop: 8, textAlign: 'right' }}>
-                          Total: {item.total_pieces} pcs
-                        </Text>
                       </View>
                     );
-                  })}
+                  })()}
                   {viewPO.notes && (
                     <View style={{ backgroundColor: '#fef3c7', borderRadius: 8, padding: 12, marginTop: 8 }}>
                       <Text style={{ fontSize: 12, fontWeight: '600', color: '#92400e', marginBottom: 4 }}>Notes:</Text>
@@ -2705,4 +2982,41 @@ const styles = StyleSheet.create({
   lineBadgeText: { fontSize: 12, fontWeight: '600', color: '#4361ee' },
   sizeBadge: { backgroundColor: '#f3f4f6', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   sizeBadgeText: { fontSize: 12, color: '#374151', fontWeight: '500' },
+  colorGridBox: { backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e0e7ff', marginBottom: 10, overflow: 'hidden' },
+  gridRow: { flexDirection: 'row', alignItems: 'center' },
+  gridColorCell: { width: 90, padding: 4, backgroundColor: '#1e1b4b', justifyContent: 'center', alignItems: 'center', minHeight: 36 },
+  gridColorInputCell: { width: 90, padding: 4, justifyContent: 'center', alignItems: 'center', minHeight: 36, backgroundColor: '#f8faff' },
+  gridColorInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 4, padding: 4, fontSize: 11, textAlign: 'center', width: 82, backgroundColor: '#fff' },
+  gridCell: { width: 48, padding: 2, alignItems: 'center', minHeight: 36, justifyContent: 'center' },
+  gridTotalCell: { width: 52, padding: 4, backgroundColor: '#eef2ff', alignItems: 'center', justifyContent: 'center', minHeight: 36 },
+  gridHeaderText: { fontSize: 10, fontWeight: '600', color: '#fff', textAlign: 'center' },
+  gridLabelText: { fontSize: 11, fontWeight: '600', color: '#fff', textAlign: 'center' },
+  gridValueText: { fontSize: 12, color: '#374151', textAlign: 'center' },
+  gridTotalHeader: { fontSize: 10, fontWeight: '600', color: '#4361ee', textAlign: 'center' },
+  gridTotalText: { fontSize: 13, fontWeight: 'bold', color: '#4361ee', textAlign: 'center' },
+  gridInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 4, padding: 3, fontSize: 11, textAlign: 'center', width: 44, backgroundColor: '#fff' },
+  addColorBtn: { backgroundColor: '#eef2ff', borderRadius: 8, padding: 10, alignItems: 'center', marginBottom: 12, borderWidth: 1, borderColor: '#4361ee' },
+  addColorBtnText: { color: '#4361ee', fontWeight: '600', fontSize: 13 },
+  sizeNumberTag: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#eef2ff', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, gap: 6 },
+  sizeNumberText: { fontSize: 13, color: '#4361ee', fontWeight: '600' },
+  sizeNumberRemove: { fontSize: 12, color: '#ef4444', fontWeight: 'bold' },
+  cuttingColorBox: { backgroundColor: '#f8faff', borderRadius: 10, padding: 12, marginBottom: 14, borderWidth: 1, borderColor: '#e0e7ff' },
+  cuttingColorHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  cuttingColorName: { fontSize: 14, fontWeight: '700', color: '#1e1b4b' },
+  cuttingColorDiff: { fontSize: 13, fontWeight: '600' },
+  poPreviewBox: { borderWidth: 1, borderColor: '#e0e7ff', borderRadius: 12, overflow: 'hidden', marginTop: 12, marginBottom: 10 },
+  poPreviewHeader: { backgroundColor: '#1e1b4b', padding: 14, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  poPreviewLogo: { width: 26, height: 26, backgroundColor: '#000', borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
+  poPreviewTitle: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  poPreviewInfo: { backgroundColor: '#f8faff', padding: 10, gap: 4 },
+  poPreviewInfoText: { fontSize: 11, color: '#666' },
+  poPreviewInfoBold: { fontWeight: '600', color: '#1e1b4b' },
+  poPreviewTable: { backgroundColor: '#fff' },
+  poPreviewTableHeader: { flexDirection: 'row', backgroundColor: '#1e1b4b', paddingVertical: 6, paddingHorizontal: 10 },
+  poPreviewTh: { color: '#fff', fontSize: 10, fontWeight: '600' },
+  poPreviewTableRow: { flexDirection: 'row', paddingVertical: 6, paddingHorizontal: 10 },
+  poPreviewTd: { fontSize: 11, color: '#374151' },
+  poPreviewTotalBox: { backgroundColor: '#1e1b4b', padding: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  poPreviewTotalLabel: { color: '#a5b4fc', fontSize: 11, fontWeight: '600', letterSpacing: 1 },
+  poPreviewTotalValue: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
 });

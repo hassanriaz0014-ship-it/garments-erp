@@ -76,10 +76,11 @@ router.post('/', protect, async (req, res) => {
     if (items && items.length > 0) {
       for (const item of items) {
         await db.query(
-          `INSERT INTO po_items (po_id, style_no, description, color, sizes, total_pieces)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
+          `INSERT INTO po_items (po_id, style_no, description, color, sizes, total_pieces, cut_sizes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
           [po.id, item.style_no, item.description, item.color,
-           JSON.stringify(item.sizes || {}), item.total_pieces || 0]
+           JSON.stringify(item.sizes || {}), item.total_pieces || 0,
+           JSON.stringify(item.cut_sizes || {})]
         );
       }
     }
@@ -89,7 +90,7 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-// PUT — update PO status
+// PUT — update PO
 router.put('/:id', protect, async (req, res) => {
   const {
     po_number, po_date, party_id, article_name,
@@ -112,10 +113,11 @@ router.put('/:id', protect, async (req, res) => {
     if (items && items.length > 0) {
       for (const item of items) {
         await db.query(
-          `INSERT INTO po_items (po_id, style_no, description, color, sizes, total_pieces)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
+          `INSERT INTO po_items (po_id, style_no, description, color, sizes, total_pieces, cut_sizes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
           [req.params.id, item.style_no, item.description, item.color,
-           JSON.stringify(item.sizes || {}), item.total_pieces || 0]
+           JSON.stringify(item.sizes || {}), item.total_pieces || 0,
+           JSON.stringify(item.cut_sizes || {})]
         );
       }
     }
